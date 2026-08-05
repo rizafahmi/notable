@@ -58,7 +58,7 @@ defmodule NotableWeb.Layouts do
           <a href="/" class="group flex items-baseline gap-3">
             <span class="font-display text-lg tracking-tight text-text">Notable</span>
             <span class="text-[0.65rem] font-semibold tracking-[0.28em] text-text-muted/80">
-              QRIS
+              BERI MASUKAN DAN APRESIASI
             </span>
           </a>
 
