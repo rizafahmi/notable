@@ -34,4 +34,13 @@ defmodule Notable.Wib do
     end_utc = DateTime.add(start_utc, 24 * 3600, :second)
     {start_utc, end_utc}
   end
+
+  @doc """
+  Milliseconds from `now` until the start of the next WIB day after `today`.
+  Used by long-lived display LiveViews to schedule a midnight rollover.
+  """
+  def ms_until_next_midnight(%Date{} = today, %DateTime{} = now) do
+    {next_start, _} = wib_date_range(Date.add(today, 1))
+    max(0, DateTime.diff(next_start, now, :millisecond))
+  end
 end

@@ -181,6 +181,72 @@ defmodule NotableWeb.FeedbackCloudLiveTest do
     end
   end
 
+  describe "WIB midnight rollover" do
+    test "drops prior-day words so same-day words can surface", %{conn: conn} do
+      max_words = WordCloud.default_max_words()
+      day = ~D[2026-07-25]
+      next_day = Date.add(day, 1)
+      before_midnight = DateTime.new!(day, ~T[16:59:00], "Etc/UTC")
+      after_midnight = DateTime.new!(day, ~T[17:01:00], "Etc/UTC")
+      prior_words = for i <- 1..max_words, do: "prior#{i}"
+
+      Enum.with_index(prior_words, fn word, index ->
+        for offset <- 0..4 do
+          word
+          |> feedback!()
+          |> set_inserted_at(seconds_into_wib_date(day, index * 10 + offset))
+        end
+      end)
+
+      {:ok, view, _html} =
+        live_isolated(conn, NotableWeb.FeedbackCloudLive,
+          session: %{"current_now" => before_midnight}
+        )
+
+      words_before = cloud_words(view)
+      assert length(words_before) == max_words
+      assert Enum.all?(prior_words, &(&1 in words_before))
+
+      feedback!("tonightlive")
+      |> set_inserted_at(seconds_into_wib_date(next_day, 60))
+
+      feedback!("tonightlive")
+      |> set_inserted_at(seconds_into_wib_date(next_day, 120))
+
+      send(view.pid, {:set_current_now, after_midnight})
+      send(view.pid, :midnight_rollover)
+
+      words = cloud_words(view)
+      assert "tonightlive" in words
+      refute Enum.any?(prior_words, &(&1 in words))
+    end
+
+    test "shows the empty state when the new day has no feedback", %{conn: conn} do
+      day = ~D[2026-07-25]
+      before_midnight = DateTime.new!(day, ~T[16:59:00], "Etc/UTC")
+      after_midnight = DateTime.new!(day, ~T[17:01:00], "Etc/UTC")
+
+      feedback!("materi bagus")
+      |> set_inserted_at(seconds_into_wib_date(day, 100))
+
+      feedback!("materi jelas")
+      |> set_inserted_at(seconds_into_wib_date(day, 200))
+
+      {:ok, view, _html} =
+        live_isolated(conn, NotableWeb.FeedbackCloudLive,
+          session: %{"current_now" => before_midnight}
+        )
+
+      assert "materi" in cloud_words(view)
+
+      send(view.pid, {:set_current_now, after_midnight})
+      send(view.pid, :midnight_rollover)
+
+      assert has_element?(view, "#feedback-cloud-empty")
+      assert cloud_words(view) == []
+    end
+  end
+
   describe "safety rules in the rendered output" do
     test "a word from a single submission never reaches the screen", %{conn: conn} do
       feedback!("materi bagus")

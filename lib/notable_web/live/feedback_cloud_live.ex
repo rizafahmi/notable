@@ -19,7 +19,9 @@ defmodule NotableWeb.FeedbackCloudLive do
   `Notable.WordCloud`, which enforces the two display-time safety rules — a
   word needs two distinct submissions, and blocklisted words never render.
   Updates arrive on the existing `donations:created` topic, so feedback
-  submitted during the closing minutes appears without a refresh.
+  submitted during the closing minutes appears without a refresh. A long-lived
+  OBS overlay also rolls at WIB midnight so yesterday's words leave assigns
+  and cannot starve tonight's.
   """
 
   use NotableWeb, :live_view
@@ -28,24 +30,35 @@ defmodule NotableWeb.FeedbackCloudLive do
   alias Notable.Qr
   alias Notable.Wib
   alias Notable.WordCloud
+  alias NotableWeb.WibClock
 
   @topic "donations:created"
 
   @impl Phoenix.LiveView
-  def mount(_params, _session, socket) do
-    if connected?(socket), do: Phoenix.PubSub.subscribe(Notable.PubSub, @topic)
+  def mount(_params, session, socket) do
+    now = WibClock.current_now(session)
+    today = Wib.today_wib(now)
 
-    {:ok,
-     socket
-     |> assign(:messages, load_feedback_messages())
-     |> assign(:public_url, Qr.public_url())
-     |> assign_cloud()
-     |> assign_meta()}
+    socket =
+      socket
+      |> WibClock.assign_injected_now(session)
+      |> assign(:today, today)
+      |> assign(:messages, load_feedback_messages(today))
+      |> assign(:public_url, Qr.public_url())
+      |> assign_cloud()
+      |> assign_meta()
+
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(Notable.PubSub, @topic)
+      WibClock.schedule_midnight_rollover(socket, today)
+    end
+
+    {:ok, socket}
   end
 
   @impl Phoenix.LiveView
   def handle_info({:donation_created, %{status: "sent"} = feedback}, socket) do
-    if current_wib_day?(feedback) do
+    if current_wib_day?(feedback, socket) do
       {:noreply,
        socket
        |> update(:messages, &(&1 ++ [feedback.message]))
@@ -57,20 +70,39 @@ defmodule NotableWeb.FeedbackCloudLive do
 
   def handle_info({:donation_created, _donation}, socket), do: {:noreply, socket}
 
+  def handle_info(:midnight_rollover, socket) do
+    today = Wib.today_wib(WibClock.current_now(socket))
+
+    socket =
+      socket
+      |> assign(:today, today)
+      |> assign(:messages, load_feedback_messages(today))
+      |> assign_cloud()
+      |> WibClock.schedule_midnight_rollover(today)
+
+    {:noreply, socket}
+  end
+
+  # Test seam: advance the injectable current-time clock without sleeps so the
+  # midnight rollover can be exercised deterministically. Inert in production.
+  def handle_info({:set_current_now, %DateTime{} = now}, socket) do
+    {:noreply, assign(socket, :current_now, now)}
+  end
+
   # Feedback is stored newest-first; the cloud wants chronological order so
   # first-appearance ranking keeps already-visible words in place.
-  defp load_feedback_messages do
-    Wib.today_wib()
+  defp load_feedback_messages(%Date{} = today) do
+    today
     |> Donations.list_feedback_for_date()
     |> Enum.reverse()
     |> Enum.map(& &1.message)
   end
 
-  defp current_wib_day?(%{inserted_at: %DateTime{} = inserted_at}) do
-    Wib.wib_date_of_utc_datetime(inserted_at) == Wib.today_wib()
+  defp current_wib_day?(%{inserted_at: %DateTime{} = inserted_at}, socket) do
+    Wib.wib_date_of_utc_datetime(inserted_at) == socket.assigns.today
   end
 
-  defp current_wib_day?(_feedback), do: false
+  defp current_wib_day?(_feedback, _socket), do: false
 
   defp assign_cloud(socket) do
     assign(socket, :words, WordCloud.build(socket.assigns.messages))

@@ -6,20 +6,21 @@ defmodule NotableWeb.QuestionLive do
   alias Notable.Questions
   alias Notable.Questions.Question
   alias Notable.SubmissionLimiter
+  alias NotableWeb.WibClock
 
   @pubsub Notable.PubSub
   @topic "questions"
 
   @impl Phoenix.LiveView
   def mount(_params, session, socket) do
-    now = current_now(session)
+    now = WibClock.current_now(session)
     today = Questions.today_wib(now)
     visitor_id = session["visitor_id"]
     visitor_hash = hash_visitor_id(visitor_id)
 
     socket =
       socket
-      |> assign(:current_now, now)
+      |> WibClock.assign_injected_now(session)
       |> assign(:today, today)
       |> assign(:visitor_id, visitor_id)
       |> assign(:visitor_hash, visitor_hash)
@@ -39,7 +40,7 @@ defmodule NotableWeb.QuestionLive do
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(@pubsub, @topic)
-      schedule_midnight_rollover(socket)
+      WibClock.schedule_midnight_rollover(socket, today)
     end
 
     {:ok, socket}
@@ -146,14 +147,14 @@ defmodule NotableWeb.QuestionLive do
   end
 
   def handle_info(:midnight_rollover, socket) do
-    new_today = Questions.today_wib(current_now(socket))
+    new_today = Questions.today_wib(WibClock.current_now(socket))
 
     socket =
       socket
       |> assign(:today, new_today)
       |> reload_summaries()
       |> reload_today()
-      |> schedule_midnight_rollover()
+      |> WibClock.schedule_midnight_rollover(new_today)
 
     {:noreply, socket}
   end
@@ -490,22 +491,6 @@ defmodule NotableWeb.QuestionLive do
 
   ## Helpers
 
-  # Reads the injectable current-time seam. In mount it comes from the session
-  # (string keys); after mount it lives in assigns (atom keys).
-  defp current_now(%Phoenix.LiveView.Socket{} = socket) do
-    case socket.assigns[:current_now] do
-      %DateTime{} = now -> now
-      _ -> DateTime.utc_now()
-    end
-  end
-
-  defp current_now(session) when is_map(session) do
-    case Map.get(session, :current_now) || Map.get(session, "current_now") do
-      %DateTime{} = now -> now
-      _ -> DateTime.utc_now()
-    end
-  end
-
   defp hash_visitor_id(nil), do: nil
 
   defp hash_visitor_id(visitor_id) when is_binary(visitor_id),
@@ -596,14 +581,6 @@ defmodule NotableWeb.QuestionLive do
 
   defp form_params(changeset) do
     %{"name" => get_field(changeset, :name), "body" => get_field(changeset, :body)}
-  end
-
-  defp schedule_midnight_rollover(socket) do
-    now = current_now(socket.assigns)
-    {next_start, _} = Questions.wib_date_range(Date.add(socket.assigns.today, 1))
-    ms = max(0, DateTime.diff(next_start, now, :millisecond))
-    _ = Process.send_after(self(), :midnight_rollover, ms)
-    socket
   end
 
   defp body_length(form) do

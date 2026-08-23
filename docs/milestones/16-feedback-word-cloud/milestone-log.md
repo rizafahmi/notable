@@ -73,7 +73,11 @@ day-scoped listing (newest-first from the query).
 `inserted_at` falls on that day. An unbounded `list_donations(:feedback)` plus
 `max_words` let prior-day high-count terms starve tonight's words at count 2 —
 wrong for a closing slide of *this* talk. The LiveView day-scope/starvation
-test pins that prior-day fillers never occupy the rendered cap.
+test pins that prior-day fillers never occupy the rendered cap. Long-lived
+`/cloud-overlay` OBS sources also schedule a WIB midnight rollover (shared
+`NotableWeb.WibClock`, same shape as `QuestionLive`) that reloads the
+day-scoped listing so retained assigns cannot reintroduce the same starvation
+across the day boundary.
 
 **Both routes use the layout's `variant="overlay"`.** The initial attempt used
 `variant="app"` for the full-screen page; the browser showed why that is wrong — `app`
@@ -95,8 +99,10 @@ an `sr-only` "disebut N kali" per word, so meaning is never in colour or size al
   the cap, deterministic tie-breaking, the empty case, both safety rules, and layout
   stability.
 - LiveView tests: both surfaces, empty state, live broadcast, chrome hygiene,
-  single-submission and blocklisted words absent from rendered output, and
-  previous-WIB-day words cannot fill `max_words` and starve a same-day word.
+  single-submission and blocklisted words absent from rendered output,
+  previous-WIB-day words cannot fill `max_words` and starve a same-day word,
+  and WIB midnight rollover drops prior-day words from rendered output (and
+  restores the empty state when the new day has no feedback).
 - Browser-verified end to end at 1920×1080: two feedbacks submitted through the real
   donor form pushed the open `/cloud` page from 23 to 25 words **without a reload**, with
   `sesi` and `inspiratif` appended at the end and the first 23 words unchanged in order —
