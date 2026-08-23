@@ -11,6 +11,8 @@ Disallow: /overlay
 Disallow: /overlay/
 Disallow: /qr-overlay
 Disallow: /qr-overlay/
+Disallow: /cloud-overlay
+Disallow: /cloud-overlay/
 Disallow: /api/
 Disallow: /webhooks/
 Disallow: /private/

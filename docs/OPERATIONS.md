@@ -2,10 +2,11 @@
 
 ## Overview
 
-Notable is a single-streamer Phoenix LiveView app with three surfaces:
+Notable is a single-streamer Phoenix LiveView app. Operator-facing surfaces include:
 
 - Donor page: `/donate`
-- OBS overlay: `/overlay`
+- OBS tip/reaction overlay: `/overlay`
+- Feedback word cloud: `/cloud` (projector) and `/cloud-overlay` (OBS)
 - Admin page: `/admin`
 
 Payments are created as Mayar dynamic QRIS transactions. Notable creates a local `pending` donation row when the QR is generated, then upgrades it to `paid` when Mayar sends a webhook. The overlay shows paid donations as sequential alerts and recovers missed alerts after restarts by querying `paid AND alerted = false` from SQLite.
@@ -21,6 +22,8 @@ With the default `.env.example` values, the local surfaces are:
 
 - Donor page: `http://localhost:4000/donate`
 - Overlay: `http://localhost:4000/overlay`
+- Feedback word cloud (projector): `http://localhost:4000/cloud`
+- Feedback word cloud (OBS): `http://localhost:4000/cloud-overlay`
 - Admin: `http://localhost:4000/admin`
 - Webhook callback: `http://localhost:4000/webhooks/mayar/<MAYAR_WEBHOOK_TOKEN>`
 
@@ -104,6 +107,8 @@ Assuming `NOTABLE_BASE_URL=https://donate.example.com`:
 
 - Donor page: `https://donate.example.com/donate`
 - Overlay (OBS Browser Source): `https://donate.example.com/overlay`
+- Feedback word cloud (projector / screen share): `https://donate.example.com/cloud`
+- Feedback word cloud (OBS Browser Source): `https://donate.example.com/cloud-overlay`
 - Admin: `https://donate.example.com/admin`
 - Mayar webhook callback URL: `https://donate.example.com/webhooks/mayar/<MAYAR_WEBHOOK_TOKEN>`
 

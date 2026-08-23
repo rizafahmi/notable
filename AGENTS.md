@@ -59,7 +59,7 @@ Elixir 1.18, Phoenix 1.8, SQLite 3, Tailwind 4
 
 ## Constraints
 - The app is a single-user, single-streamer system, not multi-tenant.
-- It must have exactly two primary public surfaces: donor page and OBS overlay, plus a simple admin page.
+- Primary donation surfaces remain the donor page and tip/reaction OBS overlay (`/overlay`), plus a simple admin page. Additional audience/display routes (`/questions`, `/qr`, `/cloud`, and matching `-overlay` pairs where they exist) are secondary — see Guidelines.
 - Donations must be persisted to SQLite.
 - The donor flow must use Mayar-generated dynamic QRIS, one per transaction.
 - The overlay must show alerts only after payment confirmation.

@@ -27,8 +27,8 @@ Each sentiment maps to a pool of emoji. The overlay randomly picks one from the 
 - Floats toward a random destination with organic, non-linear movement
 - Duration: 3–4 seconds per emoji
 - Multiple emojis can be on screen simultaneously (no queuing)
-- Emoji-only — no sender name or message text on the overlay
-- Feedback detail (sender name, message) is visible only in the admin dashboard
+- Emoji-only — no sender name or message text on the tip/reaction overlay
+- Sender name and full message remain on `/admin`; free-feedback message text is also tokenized onto the closing-slide word cloud at `/cloud` and `/cloud-overlay` under display-time safety rules (see [AGENTS.md](AGENTS.md) Guidelines and [Milestone 16](docs/milestones/16-feedback-word-cloud/milestone-log.md))
 
 ## Streamer
 The single user who receives Notes and optional Tips. Also called "Host."
