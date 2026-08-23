@@ -54,7 +54,14 @@ defmodule NotableWeb.DonateLiveTest do
     assert html =~ ~s(<meta property="og:type" content="website")
     assert html =~ ~s(<meta property="og:title" content="Kirim Feedback &amp; Tips")
     assert html =~ ~s(<meta property="og:site_name" content="Notable")
-    assert html =~ ~s(<meta name="twitter:card" content="summary")
+
+    # The brand card is 1200x630, so the card type is the large variant rather
+    # than the square "summary" this page advertised while it had no image.
+    assert html =~ ~s(<meta name="twitter:card" content="summary_large_image")
+    assert html =~ ~s(<meta property="og:image" content="http://localhost:4000/og-image.png")
+    assert html =~ ~s(<meta property="og:image:width" content="1200")
+    assert html =~ ~s(<meta property="og:image:height" content="630")
+    assert html =~ ~s(<meta name="twitter:image" content="http://localhost:4000/og-image.png")
 
     assert html =~ ~s("https://schema.org")
     assert html =~ ~s("Organization")

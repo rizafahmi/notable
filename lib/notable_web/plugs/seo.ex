@@ -1,7 +1,8 @@
 defmodule NotableWeb.Plugs.SEO do
   @moduledoc """
-  Plug to assign SEO-related metadata (description, robots, canonical URL)
-  to the connection so they are available when rendering the root layout.
+  Plug to assign SEO-related metadata (description, robots, canonical URL,
+  Open Graph image) to the connection so they are available when rendering the
+  root layout.
   """
   import Plug.Conn
 
@@ -13,6 +14,10 @@ defmodule NotableWeb.Plugs.SEO do
       |> String.trim_trailing("/")
 
     path = conn.request_path
+
+    # Site-wide brand card. Assigned before the per-path branch so every surface
+    # carries it, including the ones that fall through to the catch-all clause.
+    conn = assign(conn, :og_image, base_url <> "/og-image.png")
 
     case path do
       "/" ->
