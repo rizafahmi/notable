@@ -725,7 +725,7 @@ defmodule NotableWeb.DonateLive do
           "@type": "Organization",
           "name": "Notable",
           "url": "https://feedback.rizafahmi.com",
-          "logo": "https://feedback.rizafahmi.com/favicon.ico",
+          "logo": "https://feedback.rizafahmi.com/icon-512.png",
           "sameAs": [
             "https://rizafahmi.com/",
             "https://github.com/rizafahmi",
