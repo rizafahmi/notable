@@ -1,9 +1,14 @@
 defmodule NotableWeb.FeedbackCloudLiveTest do
   use NotableWeb.ConnCase, async: false
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
   alias Notable.Donations
+  alias Notable.Donations.Donation
+  alias Notable.Repo
+  alias Notable.Wib
+  alias Notable.WordCloud
 
   defp feedback!(message) do
     {:ok, feedback} =
@@ -14,6 +19,21 @@ defmodule NotableWeb.FeedbackCloudLiveTest do
       })
 
     feedback
+  end
+
+  defp set_inserted_at(donation, utc_datetime) do
+    {1, _} =
+      Repo.update_all(
+        from(d in Donation, where: d.id == ^donation.id),
+        set: [inserted_at: utc_datetime, updated_at: utc_datetime]
+      )
+
+    Repo.get!(Donation, donation.id)
+  end
+
+  defp seconds_into_wib_date(%Date{} = date, seconds) when is_integer(seconds) do
+    {start_utc, _} = Wib.wib_date_range(date)
+    DateTime.add(start_utc, seconds, :second)
   end
 
   defp cloud_words(view) do
@@ -131,6 +151,33 @@ defmodule NotableWeb.FeedbackCloudLiveTest do
       word_html = view |> element(~s([data-word="materi"])) |> render()
       assert word_html =~ "2"
       assert word_html =~ "sr-only"
+    end
+  end
+
+  describe "WIB day scoping" do
+    test "previous-day words cannot fill the cap and starve same-day words", %{conn: conn} do
+      max_words = WordCloud.default_max_words()
+      yesterday = Date.add(Wib.today_wib(), -1)
+      prior_words = for i <- 1..max_words, do: "prior#{i}"
+
+      # Fill the cap with higher-count words from a previous WIB day so that,
+      # without day scoping, take_top/2 would starve the same-day word at count 2.
+      Enum.with_index(prior_words, fn word, index ->
+        for offset <- 0..4 do
+          word
+          |> feedback!()
+          |> set_inserted_at(seconds_into_wib_date(yesterday, index * 10 + offset))
+        end
+      end)
+
+      feedback!("tonightlive")
+      feedback!("tonightlive")
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      words = cloud_words(view)
+      assert "tonightlive" in words
+      refute Enum.any?(prior_words, &(&1 in words))
     end
   end
 

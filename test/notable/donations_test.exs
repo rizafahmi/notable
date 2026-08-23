@@ -6,6 +6,7 @@ defmodule Notable.DonationsTest do
   alias Notable.Donations
   alias Notable.Donations.Donation
   alias Notable.Repo
+  alias Notable.Wib
 
   describe "create_pending_donation/1" do
     test "creates a pending donation at QR generation time" do
@@ -369,6 +370,39 @@ defmodule Notable.DonationsTest do
       refute paid_tip.id in feedback_ids
 
       assert Enum.map(Donations.list_donations("feedback"), & &1.id) == [feedback.id]
+    end
+
+    test "list_feedback_for_date/1 returns only feedback in the WIB day" do
+      today = Wib.today_wib()
+      yesterday = Date.add(today, -1)
+      {yesterday_start, _} = Wib.wib_date_range(yesterday)
+      {today_start, _} = Wib.wib_date_range(today)
+
+      {:ok, prior} =
+        Donations.create_feedback(%{
+          donor_name: "Prior",
+          reaction: "good",
+          message: "kemarin"
+        })
+
+      {:ok, same_day} =
+        Donations.create_feedback(%{
+          donor_name: "Today",
+          reaction: "good",
+          message: "hari ini"
+        })
+
+      Repo.update_all(from(d in Donation, where: d.id == ^prior.id),
+        set: [inserted_at: DateTime.add(yesterday_start, 3600, :second)]
+      )
+
+      Repo.update_all(from(d in Donation, where: d.id == ^same_day.id),
+        set: [inserted_at: DateTime.add(today_start, 3600, :second)]
+      )
+
+      today_ids = Enum.map(Donations.list_feedback_for_date(today), & &1.id)
+      assert today_ids == [same_day.id]
+      refute prior.id in today_ids
     end
 
     test "lists all donations ordered by newest first" do

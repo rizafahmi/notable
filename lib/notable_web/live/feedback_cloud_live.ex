@@ -8,21 +8,25 @@ defmodule NotableWeb.FeedbackCloudLive do
   * `/cloud` — full-screen dark page for a projector or screen share.
   * `/cloud-overlay` — transparent, header-less OBS browser source.
 
-  The only difference is the `Layouts.app` `variant`, so there is one page to
-  keep correct rather than two.
+  Both routes use `Layouts.app` `variant="overlay"`: the `app` variant
+  constrains content to `max-w-5xl` and renders the flash group, which pops a
+  reconnect banner over a live talk. The real difference is `live_action`
+  driving the surface background — `bg-background` for `/cloud`, transparent
+  for `/cloud-overlay`.
 
   Words come from free feedback message bodies (`Donation` rows with
-  `status: "sent"`), ranked by `Notable.WordCloud`, which enforces the two
-  display-time safety rules — a word needs two distinct submissions, and
-  blocklisted words never render. Updates arrive on the existing
-  `donations:created` topic, so feedback submitted during the closing minutes
-  appears without a refresh.
+  `status: "sent"`) for the **current Asia/Jakarta (WIB) day**, ranked by
+  `Notable.WordCloud`, which enforces the two display-time safety rules — a
+  word needs two distinct submissions, and blocklisted words never render.
+  Updates arrive on the existing `donations:created` topic, so feedback
+  submitted during the closing minutes appears without a refresh.
   """
 
   use NotableWeb, :live_view
 
   alias Notable.Donations
   alias Notable.Qr
+  alias Notable.Wib
   alias Notable.WordCloud
 
   @topic "donations:created"
@@ -41,10 +45,14 @@ defmodule NotableWeb.FeedbackCloudLive do
 
   @impl Phoenix.LiveView
   def handle_info({:donation_created, %{status: "sent"} = feedback}, socket) do
-    {:noreply,
-     socket
-     |> update(:messages, &(&1 ++ [feedback.message]))
-     |> assign_cloud()}
+    if current_wib_day?(feedback) do
+      {:noreply,
+       socket
+       |> update(:messages, &(&1 ++ [feedback.message]))
+       |> assign_cloud()}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:donation_created, _donation}, socket), do: {:noreply, socket}
@@ -52,11 +60,17 @@ defmodule NotableWeb.FeedbackCloudLive do
   # Feedback is stored newest-first; the cloud wants chronological order so
   # first-appearance ranking keeps already-visible words in place.
   defp load_feedback_messages do
-    :feedback
-    |> Donations.list_donations()
+    Wib.today_wib()
+    |> Donations.list_feedback_for_date()
     |> Enum.reverse()
     |> Enum.map(& &1.message)
   end
+
+  defp current_wib_day?(%{inserted_at: %DateTime{} = inserted_at}) do
+    Wib.wib_date_of_utc_datetime(inserted_at) == Wib.today_wib()
+  end
+
+  defp current_wib_day?(_feedback), do: false
 
   defp assign_cloud(socket) do
     assign(socket, :words, WordCloud.build(socket.assigns.messages))

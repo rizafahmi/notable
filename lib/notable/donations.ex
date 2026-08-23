@@ -7,6 +7,7 @@ defmodule Notable.Donations do
 
   alias Notable.Donations.Donation
   alias Notable.Repo
+  alias Notable.Wib
 
   def list_donations(filter \\ :paid)
 
@@ -53,6 +54,22 @@ defmodule Notable.Donations do
   end
 
   def list_donations("feedback"), do: list_donations(:feedback)
+
+  @doc """
+  Feedback (`status: "sent"`) for a single Asia/Jakarta calendar day, newest-first.
+
+  Uses the shared half-open WIB day range from `Notable.Wib` so the cloud and
+  other day-scoped surfaces share one day boundary.
+  """
+  def list_feedback_for_date(%Date{} = wib_date) do
+    {start_utc, end_utc} = Wib.wib_date_range(wib_date)
+
+    Donation
+    |> where([d], d.status == "sent")
+    |> where([d], d.inserted_at >= ^start_utc and d.inserted_at < ^end_utc)
+    |> order_by([d], desc: d.inserted_at, desc: d.id)
+    |> Repo.all()
+  end
 
   def create_pending_donation(attrs) when is_map(attrs) do
     attrs = Map.drop(attrs, [:status, :alerted, "status", "alerted"])
