@@ -64,8 +64,16 @@ its own count crosses a threshold.
 
 **Render order is first-appearance order**, so new words append to the end and
 already-visible words keep their position when feedback arrives mid-talk. This is why
-`build/2` requires messages **oldest-first** and the LiveView reverses
-`list_donations(:feedback)` (which returns newest-first).
+`build/2` requires messages **oldest-first** and the LiveView reverses the
+day-scoped listing (newest-first from the query).
+
+**Load path is the current WIB day, not all-time.** Mount uses
+`Donations.list_feedback_for_date(Wib.today_wib())` (same `today_wib` /
+`wib_date_range` precedent as questions); PubSub appends only feedback whose
+`inserted_at` falls on that day. An unbounded `list_donations(:feedback)` plus
+`max_words` let prior-day high-count terms starve tonight's words at count 2 —
+wrong for a closing slide of *this* talk. The LiveView day-scope/starvation
+test pins that prior-day fillers never occupy the rendered cap.
 
 **Both routes use the layout's `variant="overlay"`.** The initial attempt used
 `variant="app"` for the full-screen page; the browser showed why that is wrong — `app`
@@ -86,9 +94,9 @@ an `sr-only` "disebut N kali" per word, so meaning is never in colour or size al
   input, punctuation and URL stripping, pure numbers, single characters, case folding,
   the cap, deterministic tie-breaking, the empty case, both safety rules, and layout
   stability.
-- 19 LiveView tests: both surfaces, empty state, live broadcast, chrome hygiene, and —
-  as their own explicit cases — a single-submission word and a blocklisted word proven
-  absent from the rendered output.
+- LiveView tests: both surfaces, empty state, live broadcast, chrome hygiene,
+  single-submission and blocklisted words absent from rendered output, and
+  previous-WIB-day words cannot fill `max_words` and starve a same-day word.
 - Browser-verified end to end at 1920×1080: two feedbacks submitted through the real
   donor form pushed the open `/cloud` page from 23 to 25 words **without a reload**, with
   `sesi` and `inspiratif` appended at the end and the first 23 words unchanged in order —
