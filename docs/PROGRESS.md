@@ -1,6 +1,7 @@
 # Project Progress
 
 ## Current State
+- `/cloud` (full-screen dark) and `/cloud-overlay` (transparent OBS source) render a live word cloud of **current WIB-day** audience feedback for the closing minutes of a talk. Feedback carries **no moderation state**, so display is gated by two hard rules in `Notable.WordCloud`: a word needs **two distinct submissions**, and a profanity/slur blocklist (`Notable.WordCloud.Lexicon`, exact-token) filters words out. Both are proven absent from rendered output by test. See [Milestone 16 log](milestones/16-feedback-word-cloud/milestone-log.md)
 - `/qr` and `/qr-overlay` now render an animated canvas QR (lightning-bolt data modules, colour-coded finders, data-flow wave, pathway pulses, multiply scanner sweep) for [#6](https://github.com/rizafahmi/notable/issues/6). This also fixed three live defects on `main`: both pages rendered a blank QR, and the PNG download was broken by CSP plus a 150px rasterisation. Scannability is enforced by a per-pixel luminance budget in `Notable.Qr` and verified with OpenCV; see [Milestone 15 log](milestones/15-animated-qr-page/milestone-log.md)
 - Notable rename slice 3/4 ([#68](https://github.com/rizafahmi/donatex/issues/68)): `NOTABLE_BASE_URL` is canonical; `DONATEX_BASE_URL` remains a temporary alias in runtime/dev config, `.env.example`, and OPERATIONS. Slices 1–2 merged ([#66](https://github.com/rizafahmi/donatex/issues/66) / PR #70, [#67](https://github.com/rizafahmi/donatex/issues/67) / PR #71). Remaining: GitHub rename ([#69](https://github.com/rizafahmi/donatex/issues/69)); parent [#2](https://github.com/rizafahmi/donatex/issues/2).
 - Tip → Mayar QRIS path is rate-limited per peer IP via `SubmissionLimiter` (`{:tip, ip}`) before `create_qr` (fixes [#27](https://github.com/rizafahmi/donatex/issues/27)); persist-failure remains fail-closed for the donor; see [Milestone 14 log](milestones/14-tip-rate-limit/milestone-log.md)
@@ -18,6 +19,7 @@
 - Release status: mobile donor and OBS-sized browser smoke checks passed; ready for deployment configuration and a live Mayar transaction smoke check
 
 ## Completed
+- [x] Audience feedback word cloud at `/cloud` and `/cloud-overlay`, with two display-time safety rules — see [Milestone 16 log](milestones/16-feedback-word-cloud/milestone-log.md).
 - [x] [#6](https://github.com/rizafahmi/notable/issues/6) Artistic animated `/qr` page with a decoder-verified scannability budget — see [Milestone 15 log](milestones/15-animated-qr-page/milestone-log.md).
 - [x] [#27](https://github.com/rizafahmi/donatex/issues/27) Tip path rate-limit Mayar QR + orphan QRIS fail-closed — see [Milestone 14 log](milestones/14-tip-rate-limit/milestone-log.md).
 - [x] [#31](https://github.com/rizafahmi/donatex/issues/31) Webhook ops hardening — see [Milestone 13 log](milestones/13-webhook-ops-hardening/milestone-log.md).
@@ -87,11 +89,12 @@
 - Cross-node visitor totals depend on healthy production DNS clustering and PubSub; only single-node Presence behavior has been verified locally
 
 ## Next Steps
-1. Notable rename remaining slice: GitHub repo rename ([#69](https://github.com/rizafahmi/donatex/issues/69)); close parent [#2](https://github.com/rizafahmi/donatex/issues/2) after that lands. Keep `DONATEX_*` env aliases until the captain says drop them.
-2. Merge open hardening PRs still awaiting review (#26 amount-fallback) as they land.
-3. Configure the production environment and deploy using the documented release process.
-4. Verify production DNS cluster membership and that donor Presence totals propagate across nodes before making cross-node count claims.
-5. Run one final low-value live Mayar QRIS transaction against the deployed callback URL.
+1. Extend `Notable.WordCloud.Lexicon`'s blocklist if a live audience surfaces variants it misses — matching is exact-token, so inflected or misspelled forms pass through.
+2. Notable rename remaining slice: GitHub repo rename ([#69](https://github.com/rizafahmi/donatex/issues/69)); close parent [#2](https://github.com/rizafahmi/donatex/issues/2) after that lands. Keep `DONATEX_*` env aliases until the captain says drop them.
+3. Merge open hardening PRs still awaiting review (#26 amount-fallback) as they land.
+4. Configure the production environment and deploy using the documented release process.
+5. Verify production DNS cluster membership and that donor Presence totals propagate across nodes before making cross-node count claims.
+6. Run one final low-value live Mayar QRIS transaction against the deployed callback URL.
 
 ## References
 - [DECISIONS.md](file:///Users/riza/code/donatex/docs/DECISIONS.md)
@@ -112,4 +115,5 @@
 - Milestone 14 log: [docs/milestones/14-tip-rate-limit/milestone-log.md](file:///Users/riza/code/donatex/docs/milestones/14-tip-rate-limit/milestone-log.md)
 - Milestone 13 log: [docs/milestones/13-webhook-ops-hardening/milestone-log.md](file:///Users/riza/code/donatex/docs/milestones/13-webhook-ops-hardening/milestone-log.md)
 - Milestone 15 log: [docs/milestones/15-animated-qr-page/milestone-log.md](milestones/15-animated-qr-page/milestone-log.md)
+- Milestone 16 log: [docs/milestones/16-feedback-word-cloud/milestone-log.md](milestones/16-feedback-word-cloud/milestone-log.md)
 - ADRs: [docs/decisions](file:///Users/riza/code/donatex/docs/decisions)
