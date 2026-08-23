@@ -1,0 +1,156 @@
+defmodule NotableWeb.FeedbackCloudLive do
+  @moduledoc """
+  A closing-slide display page: everything the audience said, as one image.
+
+  Serves both of Notable's display situations from a single LiveView, exactly
+  as the `/qr` and `/qr-overlay` pair does:
+
+  * `/cloud` — full-screen dark page for a projector or screen share.
+  * `/cloud-overlay` — transparent, header-less OBS browser source.
+
+  The only difference is the `Layouts.app` `variant`, so there is one page to
+  keep correct rather than two.
+
+  Words come from free feedback message bodies (`Donation` rows with
+  `status: "sent"`), ranked by `Notable.WordCloud`, which enforces the two
+  display-time safety rules — a word needs two distinct submissions, and
+  blocklisted words never render. Updates arrive on the existing
+  `donations:created` topic, so feedback submitted during the closing minutes
+  appears without a refresh.
+  """
+
+  use NotableWeb, :live_view
+
+  alias Notable.Donations
+  alias Notable.Qr
+  alias Notable.WordCloud
+
+  @topic "donations:created"
+
+  @impl Phoenix.LiveView
+  def mount(_params, _session, socket) do
+    if connected?(socket), do: Phoenix.PubSub.subscribe(Notable.PubSub, @topic)
+
+    {:ok,
+     socket
+     |> assign(:messages, load_feedback_messages())
+     |> assign(:public_url, Qr.public_url())
+     |> assign_cloud()
+     |> assign_meta()}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_info({:donation_created, %{status: "sent"} = feedback}, socket) do
+    {:noreply,
+     socket
+     |> update(:messages, &(&1 ++ [feedback.message]))
+     |> assign_cloud()}
+  end
+
+  def handle_info({:donation_created, _donation}, socket), do: {:noreply, socket}
+
+  # Feedback is stored newest-first; the cloud wants chronological order so
+  # first-appearance ranking keeps already-visible words in place.
+  defp load_feedback_messages do
+    :feedback
+    |> Donations.list_donations()
+    |> Enum.reverse()
+    |> Enum.map(& &1.message)
+  end
+
+  defp assign_cloud(socket) do
+    assign(socket, :words, WordCloud.build(socket.assigns.messages))
+  end
+
+  defp assign_meta(socket) do
+    socket
+    |> assign(:page_title, "Suara Ruangan")
+    |> assign(:meta_description, "Awan kata dari feedback penonton, ditampilkan langsung.")
+    |> assign(:meta_robots, "noindex, nofollow")
+    |> assign(:canonical_url, socket.assigns.public_url <> path_for(socket.assigns.live_action))
+  end
+
+  defp path_for(:overlay), do: "/cloud-overlay"
+  defp path_for(_action), do: "/cloud"
+
+  # Both routes use the layout's bare display variant: full height, no site
+  # header, and crucially no flash or reconnect banners, which must never pop
+  # over a talk. The only difference is whether the page paints a background.
+  defp surface(:overlay), do: "obs"
+  defp surface(_action), do: "screen"
+
+  defp surface_class(:overlay), do: nil
+  defp surface_class(_action), do: "bg-background"
+
+  # Absolute size steps, so a word only grows when its own count crosses a
+  # threshold rather than whenever the busiest word gains a mention.
+  defp size_class(level) do
+    case level do
+      1 -> "text-4xl sm:text-5xl"
+      2 -> "text-5xl sm:text-6xl"
+      3 -> "text-6xl sm:text-7xl"
+      4 -> "text-7xl sm:text-8xl"
+      _ -> "text-8xl sm:text-9xl"
+    end
+  end
+
+  # Colour is decoration only: every word also states its count in text.
+  defp tone_class(level) do
+    case rem(level, 3) do
+      0 -> "text-accent-2"
+      1 -> "text-text"
+      _ -> "text-accent"
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def render(assigns) do
+    ~H"""
+    <Layouts.app flash={@flash} variant="overlay" show_header={false}>
+      <section
+        id="feedback-cloud"
+        data-surface={surface(@live_action)}
+        class={[
+          "relative flex min-h-dvh w-full flex-col items-center justify-center",
+          "px-6 py-10 sm:px-12",
+          surface_class(@live_action)
+        ]}
+      >
+        <h1 class="sr-only">Suara ruangan: awan kata dari feedback penonton</h1>
+
+        <div
+          :if={@words == []}
+          id="feedback-cloud-empty"
+          class="flex flex-col items-center gap-5 text-center"
+        >
+          <p class="font-display text-4xl font-bold text-text sm:text-6xl">
+            Menunggu suara ruangan…
+          </p>
+          <p class="max-w-5xl text-2xl font-semibold text-balance text-text-muted sm:text-4xl">
+            Kirim feedback di <span class="text-accent">{@public_url}</span>
+            dan kata-katamu muncul di sini.
+          </p>
+        </div>
+
+        <ul
+          :if={@words != []}
+          class="flex max-w-[80vw] flex-wrap items-baseline justify-center gap-x-8 gap-y-4"
+        >
+          <li
+            :for={word <- @words}
+            data-word={word.word}
+            data-level={word.level}
+            class={[
+              "font-display font-bold leading-none tracking-tight",
+              size_class(word.level),
+              tone_class(word.level)
+            ]}
+          >
+            {word.word}<span class="sr-only">, disebut {word.count} kali</span>
+          </li>
+        </ul>
+      </section>
+    </Layouts.app>
+    """
+  end
+end
