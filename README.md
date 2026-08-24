@@ -4,6 +4,7 @@ Self-hosted livestream donation app for a single streamer:
 
 - Donor page (`/donate`) generates a Mayar dynamic QRIS per donation
 - OBS overlay (`/overlay`) shows paid donations as sequential on-stream alerts
+- Feedback word cloud (`/cloud`, `/cloud-overlay`) for projector or OBS closing slides
 - Admin page (`/admin`) lists donations and lets you replay missed alerts
 
 Donations are persisted to SQLite. Alerts only appear after payment confirmation via Mayar webhooks.
@@ -19,6 +20,8 @@ Donations are persisted to SQLite. Alerts only appear after payment confirmation
 Local URLs (default):
 - Donor page: `http://localhost:4000/donate`
 - Overlay (OBS browser source): `http://localhost:4000/overlay`
+- Feedback word cloud (projector): `http://localhost:4000/cloud`
+- Feedback word cloud (OBS): `http://localhost:4000/cloud-overlay`
 - Admin: `http://localhost:4000/admin`
 - Webhook callback: `http://localhost:4000/webhooks/mayar/<MAYAR_WEBHOOK_TOKEN>`
 
@@ -73,6 +76,7 @@ Notable adalah aplikasi donasi livestream yang bisa di-host sendiri untuk 1 stre
 
 - Halaman donatur (`/donate`) membuat QRIS dinamis via Mayar untuk setiap donasi
 - Overlay OBS (`/overlay`) menampilkan alert setelah pembayaran terkonfirmasi (via webhook)
+- Awan kata feedback (`/cloud`, `/cloud-overlay`) untuk proyektor atau sumber browser OBS
 - Halaman admin (`/admin`) untuk melihat daftar donasi dan replay alert
 
 Panduan setup & deployment: [OPERATIONS.md](docs/OPERATIONS.md).

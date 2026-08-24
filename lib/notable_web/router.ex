@@ -36,6 +36,8 @@ defmodule NotableWeb.Router do
     live "/qr", QrCodeLive
     live "/questions", QuestionLive
     live "/qr-overlay", QrOverlayLive
+    live "/cloud", FeedbackCloudLive, :page
+    live "/cloud-overlay", FeedbackCloudLive, :overlay
   end
 
   scope "/", NotableWeb do

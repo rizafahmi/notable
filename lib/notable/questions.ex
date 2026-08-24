@@ -11,40 +11,24 @@ defmodule Notable.Questions do
   alias Notable.Questions.Question
   alias Notable.Questions.QuestionVote
   alias Notable.Repo
+  alias Notable.Wib
 
   @pubsub Notable.PubSub
   @topic "questions"
 
-  # Asia/Jakarta is permanently UTC+07:00 (no DST), so a fixed offset suffices.
-  @wib_offset_seconds 7 * 3600
-
-  ## Date helpers (fixed WIB offset)
+  ## Date helpers (fixed WIB offset — see `Notable.Wib`)
 
   @doc "The Asia/Jakarta date for a UTC `DateTime`."
-  def wib_date_of_utc_datetime(%DateTime{} = datetime) do
-    datetime
-    |> DateTime.add(@wib_offset_seconds, :second)
-    |> DateTime.to_date()
-  end
+  defdelegate wib_date_of_utc_datetime(datetime), to: Wib
 
   @doc "Today's Asia/Jakarta date for a UTC `DateTime` (defaults to now)."
-  def today_wib(now \\ DateTime.utc_now())
-  def today_wib(%DateTime{} = now), do: wib_date_of_utc_datetime(now)
-  def today_wib(nil), do: today_wib()
+  def today_wib(now \\ DateTime.utc_now()), do: Wib.today_wib(now)
 
   @doc """
   Half-open UTC `{start, end}` range covering a single WIB day:
   records with `inserted_at >= start and inserted_at < end` belong to that day.
   """
-  def wib_date_range(%Date{} = date) do
-    start_utc =
-      date
-      |> DateTime.new!(~T[00:00:00], "Etc/UTC")
-      |> DateTime.add(-@wib_offset_seconds, :second)
-
-    end_utc = DateTime.add(start_utc, 24 * 3600, :second)
-    {start_utc, end_utc}
-  end
+  defdelegate wib_date_range(date), to: Wib
 
   ## Public creation
 
