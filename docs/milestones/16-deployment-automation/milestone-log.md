@@ -99,7 +99,7 @@ A test traps a database inside a release directory and asserts the pruner protec
 
 `ln -sfn` is not atomic - it unlinks then links.
 The atomic idiom is to create a temporary symlink and `rename(2)` it over the target, which needs an explicit "do not follow the destination symlink" flag: GNU spells it `mv -T`, BSD/macOS spells it `mv -h`.
-The script tries both and verifies the resulting `readlink`, so it behaves identically on the Ubuntu target and on the macOS machine the tests run on.
+The script tries both and verifies the resulting `readlink`, so it behaves identically on the target's GNU userland (Debian 12) and on the macOS machine the tests run on.
 
 ### Automatic rollback on a failed start
 
@@ -187,6 +187,8 @@ One incidental fix: the "digests assets before building the release" assertion s
 
 `ADR-026` was also added to the sequential ADR index in `docs/ARCHITECTURE.md`, which it had been missing from.
 
+The soname assertion is the one new test in this follow-up, so the guard is 23 tests; the "22 of 22" figure recorded above is the count before it.
+
 ## Files
 
 | Path | Role |
@@ -198,7 +200,7 @@ One incidental fix: the "digests assets before building the release" assertion s
 | `test/support/deploy_sandbox.ex` | Sandbox filesystem plus stubbed privileged tooling. |
 | `test/notable/deploy/remote_deploy_test.exs` | Ordering, rollback selection, retention, database safety. |
 | `test/notable/deploy/ssh_deploy_test.exs` | SSH invocation composition, host key verification, key hygiene. |
-| `test/notable/deploy/deploy_workflow_test.exs` | Trigger shape, no hardcoded host, CI untouched, docs in sync. |
+| `test/notable/deploy/deploy_workflow_test.exs` | Runner ABI invariant, trigger shape, no hardcoded host, CI untouched, docs in sync. |
 | `docs/decisions/ADR-025-build-releases-in-github-actions.md` | Build-in-CI and manual-trigger rationale. |
 | `docs/decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md` | Why the runner image is pinned, and to what. |
 | `docs/OPERATIONS.md` | Automated flow as the primary path; manual retained as fallback. |

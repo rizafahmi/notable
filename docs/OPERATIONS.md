@@ -401,7 +401,8 @@ If you make the switch, either gate the deploy job on the CI workflow completing
 Use this when GitHub Actions is unavailable.
 It performs the same steps as the automation, by hand.
 
-Build somewhere that is not the VM (a free-tier box is too small to build an Elixir release reliably):
+Build somewhere that is not the VM (a free-tier box is too small to build an Elixir release reliably).
+Whatever you build on is subject to the same constraint as the deploy runner, because the release carries the build machine's ABI to the VM. Check it against [Build Runner And The Target's glibc](#build-runner-and-the-targets-glibc) first: a macOS laptop or a newer Linux distribution produces a release the VM cannot start.
 
 ```bash
 MIX_ENV=prod mix deps.get --only prod
