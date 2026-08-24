@@ -27,7 +27,7 @@ concurrency:
 jobs:
   rollback:
     name: roll back
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     environment: production
 
     steps:

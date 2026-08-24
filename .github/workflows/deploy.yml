@@ -38,7 +38,11 @@ concurrency:
 jobs:
   deploy:
     name: build and deploy
-    runs-on: ubuntu-latest
+    # Pinned to match the deploy target, not the newest runner.
+    # The release bundles ERTS compiled against the runner's glibc, and glibc
+    # is only forward-compatible. The VM is Debian 12 (glibc 2.36); the 22.04
+    # runner is 2.35, which runs there. ubuntu-latest is 24.04 (2.39) and does not.
+    runs-on: ubuntu-22.04
     environment: production
 
     env:
