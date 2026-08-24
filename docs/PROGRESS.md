@@ -101,7 +101,6 @@
 6. Extend `Notable.WordCloud.Lexicon`'s blocklist if a live audience surfaces variants it misses — matching is exact-token, so inflected or misspelled forms pass through.
 7. Notable rename remaining slice: GitHub repo rename ([#69](https://github.com/rizafahmi/donatex/issues/69)); close parent [#2](https://github.com/rizafahmi/donatex/issues/2) after that lands. Keep `DONATEX_*` env aliases until the captain says drop them.
 8. Merge open hardening PRs still awaiting review (#26 amount-fallback) as they land.
-9. Configure the production environment and deploy using the documented release process.
 10. Verify production DNS cluster membership and that donor Presence totals propagate across nodes before making cross-node count claims.
 11. Run one final low-value live Mayar QRIS transaction against the deployed callback URL.
 
