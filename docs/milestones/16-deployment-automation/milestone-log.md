@@ -27,8 +27,13 @@ Every behavioural claim below comes from the sandboxed test suite, `actionlint`,
 
 Recorded as [ADR-025](../../decisions/ADR-025-build-releases-in-github-actions.md).
 A GCP free-tier `e2-micro` has 1 GB of RAM shared with the running BEAM; compiling there competes with the process that is currently taking payments.
-The release is therefore built on `ubuntu-latest` with the Elixir 1.18.x / OTP 27 pair `ci.yml` already pins, tarred, and `scp`ed to the VM.
+The release is therefore built on a GitHub Actions runner with the Elixir 1.18.x / OTP 27 pair `ci.yml` already pins, tarred, and `scp`ed to the VM.
 ERTS ships inside the release, so the VM no longer needs Erlang or Elixir at all.
+
+> **Correction (2026-08-24).** This originally read "built on `ubuntu-latest`", and the runner is now pinned to `ubuntu-22.04`.
+> The bundled ERTS is linked against the *build* machine's glibc, and glibc is forward-compatible only, so the runner's glibc must be `<=` the target's.
+> `ubuntu-latest` rolled to Ubuntu 24.04 (glibc 2.39) while the VM runs Debian 12 (glibc 2.36), and deploy run `32682797726` failed on the VM with `GLIBC_2.38' not found`.
+> See [ADR-026](../../decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md) and [OPERATIONS.md → Build Runner And The Target's glibc](../../OPERATIONS.md#build-runner-and-the-targets-glibc).
 
 ### Logic in scripts, not in YAML
 
@@ -124,6 +129,55 @@ What is **not** verified, and cannot be from here:
 - That `systemd-run --wait --collect --pipe` behaves as expected on the target's systemd version.
 - Any end-to-end run. The first real dispatch is the captain's, after they create the secrets.
 
+## 2026-08-24 - first live dispatch failed on a build/target glibc mismatch
+
+The captain dispatched the first real deploy. It failed, and the failure was in this milestone's work.
+
+**What happened.** Run [`32682797726`](https://github.com/rizafahmi/notable/actions/runs/32682797726) built cleanly, uploaded, unpacked on the VM, and died running migrations:
+
+```
+beam.smp: /lib/x86_64-linux-gnu/libm.so.6: version `GLIBC_2.38' not found
+beam.smp: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
+deploy: error: migration failed for 20260824T022241Z-7ccd241; /opt/notable/current was left untouched
+deploy: removing never-activated release 20260824T022241Z-7ccd241
+```
+
+**The deploy machinery was not at fault, and the log proves it.** Migrations ran before the symlink swap, so `current` was never repointed, the never-activated release was removed, and the live service was untouched by the failed deploy. The safety ordering this milestone was built around did exactly what it was designed to do. The single defect was the build environment.
+
+**Cause, traced through the job log rather than assumed.**
+
+1. `runs-on: ubuntu-latest` resolved to `Image: ubuntu-24.04`.
+2. `erlef/setup-beam` therefore fetched `Installing Erlang/OTP OTP-27.3.4.16 - built on amd64/ubuntu-24.04` - an ERTS linked against Ubuntu 24.04's glibc 2.39.
+3. `mix release` bundled that ERTS into the tarball.
+4. The VM is Debian 12 (glibc 2.36). glibc is forward-compatible only, so `beam.smp` could not resolve the `GLIBC_2.38` symbols it was built against.
+
+Verified independently of the run log: `packages.debian.org/bookworm/libc6` is `2.36-9+deb12u14`, matching the VM; Ubuntu jammy's `libc6` is `2.35` and noble's is `2.39` from the archive package indexes; the `actions/runner-images` README currently maps `ubuntu-latest` to Ubuntu 24.04 and still offers `ubuntu-22.04`; `builds.hex.pm` publishes the same `OTP-27.3.4.16` built on `ubuntu-22.04`, so the pin does not cost a toolchain version.
+
+**Why the suite did not catch it.** `deploy_workflow_test.exs` asserted `runs-on: ubuntu-latest`. The guard therefore *required* the broken configuration, and it pinned the wrong axis: a specific floating image instead of the property that image had to satisfy. Swapping the literal for `ubuntu-22.04` would have reproduced the same class of bug the next time anything moved.
+
+**Fix.** The runner is pinned to `ubuntu-22.04` (glibc 2.35 <= 2.36), and the guard now asserts the invariant - see [ADR-026](../../decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md) and [OPERATIONS.md → Build Runner And The Target's glibc](../../OPERATIONS.md#build-runner-and-the-targets-glibc). The pin is a maintenance obligation, not a permanent fix: GitHub retires runner images, so this recurs.
+
+**Verification of the fix.** Written test-first against the unfixed workflow. With `runs-on: ubuntu-latest` restored, the new guard fails 3 of 22:
+
+```
+1) pins the deploy runner instead of tracking a floating -latest label
+   .github/workflows/deploy.yml: runs-on is ubuntu-latest. A floating label silently
+   re-targets the build when GitHub moves it; pin an explicit image.
+2) builds on a runner whose glibc the deployment target can execute
+3) records in-file why the runner is pinned and that the pin will expire
+```
+
+With the pin in place, 22 of 22 pass. The guard was also exercised against the two other drift modes it has to catch:
+
+- `runs-on: ubuntu-24.04` (pinned, but too new) → *"ubuntu-24.04 has glibc 2.39, newer than the deployment target's 2.36 (Debian 12). The release would build and upload, then fail to start on the VM."*
+- `runs-on: ubuntu-26.04` (pinned, glibc unknown to the test) → fails, demanding a verified glibc value before that image may be used, rather than passing unchecked.
+
+`mix ci` after the change: 466 tests, 0 failures; credo `--strict` clean; dialyzer 0 errors; `ex_dna` 0 clones; architecture policy OK.
+
+Still not verified from here, and unchanged by this fix: nothing was run against the live host, and no credentials were sought. That a release built on `ubuntu-22.04` actually starts on the VM is a reasoned conclusion from the glibc ordering, not an observation. The next dispatch is the captain's.
+
+One incidental fix: the "digests assets before building the release" assertion searched the workflow's raw text, so it could be satisfied or broken by a comment. It now strips comment lines and asserts the order of the steps that actually run.
+
 ## Files
 
 | Path | Role |
@@ -137,11 +191,12 @@ What is **not** verified, and cannot be from here:
 | `test/notable/deploy/ssh_deploy_test.exs` | SSH invocation composition, host key verification, key hygiene. |
 | `test/notable/deploy/deploy_workflow_test.exs` | Trigger shape, no hardcoded host, CI untouched, docs in sync. |
 | `docs/decisions/ADR-025-build-releases-in-github-actions.md` | Build-in-CI and manual-trigger rationale. |
+| `docs/decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md` | Why the runner image is pinned, and to what. |
 | `docs/OPERATIONS.md` | Automated flow as the primary path; manual retained as fallback. |
 
 ## Next steps for the captain
 
 1. Create the four secrets and the repository variables listed in `docs/OPERATIONS.md` under [Required Secrets And Variables](../../OPERATIONS.md#required-secrets-and-variables).
 2. Grant the deploy user the sudoers entries in the same document, or set `DEPLOY_SSH_USER` to `root` and leave the default `sudo -n` prefix (which assumes `sudo` is installed on the VM).
-3. Dispatch **Actions → Deploy** once and watch it. The first run creates `releases/` and `current` from scratch, so there is no rollback target yet.
+3. Dispatch **Actions → Deploy** once and watch it. The first run creates `releases/` and `current` from scratch, so there is no rollback target yet. (Attempted 2026-08-24 as run `32682797726`; it failed on a build/target glibc mismatch, which is fixed above and needs a fresh dispatch to confirm.)
 4. Once satisfied, consider adding a required reviewer to the `production` environment, then make the deploy-on-merge edit.

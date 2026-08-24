@@ -168,7 +168,8 @@ Mechanism lives in [scripts/deploy/remote_deploy.sh](../scripts/deploy/remote_de
 
 ### What A Deploy Does
 
-[.github/workflows/deploy.yml](../.github/workflows/deploy.yml) builds the release on an `ubuntu-latest` runner, then [scripts/deploy/ssh_deploy.sh](../scripts/deploy/ssh_deploy.sh) uploads it and invokes [scripts/deploy/remote_deploy.sh](../scripts/deploy/remote_deploy.sh) on the VM.
+[.github/workflows/deploy.yml](../.github/workflows/deploy.yml) builds the release on a pinned `ubuntu-22.04` runner, then [scripts/deploy/ssh_deploy.sh](../scripts/deploy/ssh_deploy.sh) uploads it and invokes [scripts/deploy/remote_deploy.sh](../scripts/deploy/remote_deploy.sh) on the VM.
+The runner image is pinned deliberately and must not be changed to `ubuntu-latest` - see [Build Runner And The Target's glibc](#build-runner-and-the-targets-glibc).
 
 Observable behaviour:
 
@@ -178,6 +179,54 @@ Observable behaviour:
 - If the unit does not come up after the restart, the deploy rolls itself back.
 
 Those orderings and the database guards below are pinned by tests in [test/notable/deploy/](../test/notable/deploy/).
+
+### Build Runner And The Target's glibc
+
+**The deploy runner is pinned to `ubuntu-22.04` on purpose. Do not change it to `ubuntu-latest`.**
+
+The deployment target of record:
+
+| | |
+|---|---|
+| OS | Debian GNU/Linux 12 (bookworm) |
+| glibc | 2.36 (`ldd (Debian GLIBC 2.36-9+deb12u14) 2.36`) |
+| Architecture | x86_64 |
+
+`mix release` bundles ERTS, which is why the VM needs no Erlang or Elixir - but the bundled `beam.smp` is dynamically linked against the **build machine's** glibc, and glibc is forward-compatible only.
+A binary built against glibc 2.39 runs on 2.39 and later; it cannot run on 2.36.
+
+**The rule: the deploy runner's glibc must be `<=` the target's glibc, and the runner image must be pinned explicitly, never a floating `-latest` label.**
+
+| Runner image | glibc | Runs on this VM? |
+|---|---|---|
+| `ubuntu-22.04` | 2.35 | yes - current pin |
+| `ubuntu-24.04` (= `ubuntu-latest` today) | 2.39 | **no** |
+
+The distribution name is not the constraint; only the version number is. A Debian target and an Ubuntu runner are fine, provided the numbers order correctly.
+
+#### If a deploy fails with `GLIBC_... not found`
+
+Symptom, at the migration step, after the upload succeeded:
+
+```
+beam.smp: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
+deploy: error: migration failed; /opt/notable/current was left untouched
+```
+
+The site is **not** down from this. Migrations run before the symlink swap, so `current` still points at the previous release and the never-activated one is removed. Nothing needs rolling back.
+
+The cause is a build/target glibc mismatch. Check `runs-on:` in [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) against the table above, and check the runner image the failing run actually used (the job log's "Runner Image" group, and the `erlef/setup-beam` line that names the OTP build - `built on amd64/ubuntu-24.04` means the build's glibc came from 24.04). Re-pin to an image whose glibc is `<=` 2.36 and dispatch again.
+
+#### This pin expires
+
+GitHub retires runner images - `ubuntu-20.04` is already gone from the [actions/runner-images](https://github.com/actions/runner-images) table - and Ubuntu 22.04 leaves standard LTS support in April 2027.
+`ubuntu-latest` keeps moving too; Ubuntu 26.04 is already in preview.
+When `ubuntu-22.04` goes away, Deploy will fail at build time, before anything reaches the VM. The options then are: pin the newest remaining image whose glibc is still `<=` the VM's, upgrade the VM's Debian release first and then the runner, or build in a container matching the target (`hexpm/elixir:<ver>-erlang-<ver>-debian-bookworm-*`), which removes the runner-image dependency for good.
+
+The rule is asserted in [test/notable/deploy/deploy_workflow_test.exs](../test/notable/deploy/deploy_workflow_test.exs), which fails on a floating label, on an image whose glibc exceeds the target's, and on an image whose glibc it has no verified value for. Rationale: [ADR-026](decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md).
+
+[.github/workflows/rollback.yml](../.github/workflows/rollback.yml) is pinned to the same image for consistency only. It builds nothing and produces no artifact the VM executes, so its glibc never reaches the box.
+[.github/workflows/ci.yml](../.github/workflows/ci.yml) may keep floating on `ubuntu-latest`: it runs the quality gate and ships nothing to the VM.
 
 ### Triggering A Deploy
 
@@ -430,7 +479,7 @@ Notable follows the “single server, no Docker” approach in:
 It differs from that article in one major way: Notable uses SQLite (a local file) instead of Postgres.
 On GCP, use a persistent disk (the default boot disk is already persistent) and set `DATABASE_PATH` to an absolute path on that disk.
 
-1. Provision a free-tier VM (Ubuntu) and point your domain DNS at the VM's static IP.
+1. Provision a free-tier VM and point your domain DNS at the VM's static IP. The current one is Debian 12; whatever it runs, its glibc constrains the build runner - see [Build Runner And The Target's glibc](#build-runner-and-the-targets-glibc).
 2. Ensure HTTPS termination exists (Caddy, nginx, or a managed load balancer).
 3. Forward ports 80/443 to the Phoenix port (or run Phoenix on 443 directly).
 4. Create the deploy user and configure SSH access.
@@ -440,8 +489,7 @@ On GCP, use a persistent disk (the default boot disk is already persistent) and 
 
 Erlang and Elixir do **not** need to be installed on the VM.
 `mix release` bundles ERTS, and the release is built on the CI runner.
-The build runner's OS and architecture must be compatible with the VM's: `ubuntu-latest` x86_64 targeting a same-or-newer Ubuntu x86_64 VM.
-An arm64 VM, or a VM older than the runner image, needs either a matching runner or `include_erts` set to false with Erlang installed on the box.
+That bundled ERTS is what makes the build runner's glibc matter - see [Build Runner And The Target's glibc](#build-runner-and-the-targets-glibc).
 
 ## SQLite Notes
 

@@ -38,10 +38,24 @@ concurrency:
 jobs:
   deploy:
     name: build and deploy
-    # Pinned to match the deploy target, not the newest runner.
-    # The release bundles ERTS compiled against the runner's glibc, and glibc
-    # is only forward-compatible. The VM is Debian 12 (glibc 2.36); the 22.04
-    # runner is 2.35, which runs there. ubuntu-latest is 24.04 (2.39) and does not.
+    # Pinned to the deploy target, not to the newest runner.
+    #
+    # `mix release` bundles ERTS compiled against this runner's glibc, and glibc
+    # is forward-compatible only: a release built against a newer glibc than the
+    # VM's cannot start there. The VM is Debian 12 (bookworm), glibc 2.36,
+    # x86_64. Ubuntu 22.04 is glibc 2.35, which is <= 2.36, so its build runs.
+    #
+    # `ubuntu-latest` is not a safe default here. It rolled to Ubuntu 24.04
+    # (glibc 2.39) and deploy run 32682797726 built cleanly, uploaded, and then
+    # died on the VM with `GLIBC_2.38' not found` while running migrations.
+    #
+    # This pin will need revisiting: GitHub retires runner images (ubuntu-20.04
+    # is already gone), and Ubuntu 26.04 is in preview, so `ubuntu-latest` will
+    # move again. When ubuntu-22.04 is retired, pick the newest available image
+    # whose glibc is still <= the VM's, or move the build into a container that
+    # matches the target. The rule, not the image, is the invariant - it is
+    # asserted in test/notable/deploy/deploy_workflow_test.exs and written up in
+    # docs/decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md.
     runs-on: ubuntu-22.04
     environment: production
 
