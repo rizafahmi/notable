@@ -29,10 +29,15 @@ ldd (Debian GLIBC 2.36-9+deb12u14) 2.36
 x86_64
 ```
 
-**"Compatible OS" is not the constraint; glibc is.**
+**"Compatible OS" is not the constraint; the ABI the release is built against is.**
 `mix release` bundles ERTS, so the VM needs no Erlang or Elixir - but the bundled `beam.smp` is a dynamically linked binary against the *build* machine's glibc.
 glibc is forward-compatible only: a binary built against 2.39 runs on 2.39 and later, never on 2.36.
-The distribution name is irrelevant; the version number is the whole constraint.
+The distribution name is not what has to match; the version numbers are what has to order correctly.
+
+glibc is the axis that caused this outage, but it is not the only ABI the release inherits from the build machine.
+The bundled ERTS also carries the crypto NIF, which links the *runner's* OpenSSL soname: an image with an older glibc but `libcrypto.so.1.1` (Ubuntu 20.04, say) satisfies the glibc ordering against this VM and would still fail to start on it, because Debian 12 ships `libssl3` and no `libssl1.1`.
+glibc and the OpenSSL soname are therefore the axes this decision has **checked** - not a claim that they are the complete set of axes that exist.
+Anyone re-pinning should look for further ones rather than trust that this list closes the question; writing a partial check down as though it were exhaustive is precisely the defect ADR-025's bullet had.
 
 The runner's glibc is set by the runner image, and it propagates twice: `erlef/setup-beam` downloads the prebuilt OTP matching the image (the failing run logged `Installing Erlang/OTP OTP-27.3.4.16 - built on amd64/ubuntu-24.04`), and anything compiled on the runner links against the same libc.
 
@@ -55,13 +60,20 @@ The failure was invisible until it reached production because `test/notable/depl
 
 ## Decision
 
-**The deploy runner's glibc must be less than or equal to the deployment target's, and the runner image must be pinned explicitly - never a floating `-latest` label.**
+**No ABI the deploy runner builds against may exceed what the deployment target provides, and the runner image must be pinned explicitly - never a floating `-latest` label.**
+
+The ABI axes verified to matter so far, and the form the rule takes on each:
+
+- **glibc** - the runner's must be `<=` the target's, because glibc is forward-compatible only.
+- **OpenSSL soname** - the runner's must be one the target actually ships, because sonames do not order.
+
+That is what has been checked, not a statement that nothing else applies. The rule is the general one above; these two are its verified instances, and a re-pin should test the new image against both *and* look for axes nobody has hit yet.
 
 Concretely, today:
 
-- `.github/workflows/deploy.yml` pins `runs-on: ubuntu-22.04` (glibc 2.35 <= 2.36), with an in-file comment giving the reason, the target, the outage, and the fact that the pin expires.
-- The deployment target of record is **Debian 12 (bookworm), glibc 2.36, x86_64**. It is written down in `docs/OPERATIONS.md` and in the test, because it is the number the pin is derived from.
-- `test/notable/deploy/deploy_workflow_test.exs` asserts the invariant, not the image: `runs-on` is explicitly versioned, is not `-latest`, and maps to a glibc `<=` the target's. An image the test does not have a verified glibc for fails rather than passing unchecked, so pinning a new one forces someone to look it up.
+- `.github/workflows/deploy.yml` pins `runs-on: ubuntu-22.04` (glibc 2.35 <= 2.36; `libcrypto.so.3`, which the VM provides), with an in-file comment giving the reason, the target, the outage, and the fact that the pin expires.
+- The deployment target of record is **Debian 12 (bookworm), glibc 2.36, x86_64, `libssl3` 3.0.20-1~deb12u2 and no `libssl1.1` - so `libcrypto.so.3`**. It is written down in `docs/OPERATIONS.md` and in the test, because it is what the pin is derived from.
+- `test/notable/deploy/deploy_workflow_test.exs` asserts the invariant, not the image: `runs-on` is explicitly versioned, is not `-latest`, maps to a glibc `<=` the target's, and maps to an OpenSSL soname the target provides. An image the test has no verified values for fails rather than passing unchecked, so pinning a new one forces someone to look them up.
 - The same test asserts that exactly one workflow builds a release, so the constraint cannot quietly apply to a workflow nobody pinned.
 
 Scope of the rule:
@@ -71,7 +83,7 @@ Scope of the rule:
 
 **This pin is a maintenance obligation, not a fix that stays fixed.**
 GitHub retires runner images - `ubuntu-20.04` is already gone from the `actions/runner-images` table - and Ubuntu 22.04 leaves standard LTS support in April 2027.
-When `ubuntu-22.04` is retired, the choice is: pick the newest available image whose glibc is still `<=` the VM's, upgrade the VM's Debian release and then the runner, or remove the dependency entirely (below).
+When `ubuntu-22.04` is retired, the choice is: pick the newest available image that still satisfies the rule on every axis known at that point, upgrade the VM's Debian release and then the runner, or remove the dependency entirely (below).
 The rule survives that change; the image does not.
 
 ## Alternatives Considered
@@ -84,7 +96,7 @@ The rule survives that change; the image does not.
 
 ### Build inside a container matching the target (`hexpm/elixir:<ver>-erlang-<ver>-debian-bookworm-*`)
 
-- Pros: removes the runner-image dependency entirely. The build glibc becomes the *target's* glibc by construction, so it cannot drift when GitHub moves `ubuntu-latest` or retires an image, and it stays correct without anyone remembering this ADR.
+- Pros: removes the runner-image dependency entirely. The build's ABI becomes the *target's* ABI by construction - on glibc, on the OpenSSL soname, and on any axis nobody has thought to check - so it cannot drift when GitHub moves `ubuntu-latest` or retires an image, and it stays correct without anyone remembering this ADR.
 - Cons: a second version axis to keep in step with `ci.yml`'s Elixir/OTP pins, and the release would then be built on a different toolchain image than the one CI's quality gate ran on unless CI moves too.
 - Not rejected - deferred. It is the durable answer and worth doing, but the captain needs a deploy that works now, and the pin is verifiable by reasoning that holds today. Revisit at the latest when `ubuntu-22.04` is retired, when the decision has to be made anyway.
 
@@ -103,6 +115,6 @@ The rule survives that change; the image does not.
 ## Consequences
 
 - Deploys build on `ubuntu-22.04` and produce a release the VM can execute.
-- The deployment target's OS and glibc are now recorded facts in `docs/OPERATIONS.md`, not assumptions. Changing the VM's distribution now requires updating `@target_glibc` in the deploy workflow test, which will fail loudly if the pin no longer satisfies it.
+- The deployment target's OS, glibc, and OpenSSL soname are now recorded facts in `docs/OPERATIONS.md`, not assumptions. Changing the VM's distribution now requires updating `@target_glibc` and `@target_libcrypto` in the deploy workflow test, which will fail loudly if the pin no longer satisfies them.
 - A future runner-image retirement will break Deploy. It will break it at build time, before anything reaches the VM, and the in-file comment plus this ADR say what to do about it.
 - ADR-025 stands, minus the one bullet this ADR replaces.

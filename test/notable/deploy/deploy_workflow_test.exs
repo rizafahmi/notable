@@ -29,18 +29,33 @@ defmodule Notable.Deploy.DeployWorkflowTest do
   #   Debian GNU/Linux 12 (bookworm)
   #   ldd (Debian GLIBC 2.36-9+deb12u14) 2.36
   #   x86_64
-  # Update both of these together if the VM is ever rebuilt on another release.
+  #   libssl3 3.0.20-1~deb12u2, and no libssl1.1 package - so libcrypto.so.3
+  # Update these together if the VM is ever rebuilt on another release.
   @target_os "Debian 12"
   @target_glibc "2.36"
+  @target_libcrypto "libcrypto.so.3"
 
-  # Runner image -> the glibc it builds against, which is its Ubuntu release's
-  # libc6 version (Ubuntu 22.04 = 2.35, Ubuntu 24.04 = 2.39; see
-  # packages.ubuntu.com libc6 for the release). Deliberately not exhaustive: an
-  # image that is not listed fails the test below rather than passing unchecked,
-  # so pinning a new one forces someone to look its glibc up first.
-  @runner_glibc %{
-    "ubuntu-22.04" => "2.35",
-    "ubuntu-24.04" => "2.39"
+  # Runner image -> the ABI values verified for that image.
+  #
+  #   :glibc     - the image's Ubuntu release's libc6 version (22.04 = 2.35,
+  #                24.04 = 2.39; see packages.ubuntu.com libc6 for the release).
+  #   :libcrypto - the OpenSSL soname the release's bundled crypto NIF links
+  #                against (22.04 ships libssl3 3.0.2 and 24.04 ships libssl3,
+  #                so libcrypto.so.3; 20.04 shipped libssl1.1 1.1.1f, so
+  #                libcrypto.so.1.1).
+  #
+  # These are the ABI axes that have been *checked*, not a complete list of the
+  # ones that exist. The general rule is that no ABI the runner builds against
+  # may exceed what the target provides; glibc and the OpenSSL soname are the
+  # instances verified so far, and anyone re-pinning should look for others
+  # rather than treat this list as closed.
+  #
+  # The image list is deliberately not exhaustive either: an image that is not
+  # listed fails the tests below rather than passing unchecked, so pinning a new
+  # one forces someone to look its values up first.
+  @runner_abi %{
+    "ubuntu-22.04" => %{glibc: "2.35", libcrypto: "libcrypto.so.3"},
+    "ubuntu-24.04" => %{glibc: "2.39", libcrypto: "libcrypto.so.3"}
   }
 
   describe "deploy workflow" do
@@ -103,18 +118,29 @@ defmodule Notable.Deploy.DeployWorkflowTest do
 
     test "builds on a runner whose glibc the deployment target can execute" do
       image = runs_on(read(@deploy_workflow))
-
-      assert Map.has_key?(@runner_glibc, image),
-             "#{@deploy_workflow}: runs-on is #{image}, whose glibc this test does " <>
-               "not know. Look up that image's glibc (its Ubuntu release's libc6 " <>
-               "version) and add it to @runner_glibc with its source before pinning it."
-
-      glibc = @runner_glibc[image]
+      glibc = verified_abi(@deploy_workflow, image).glibc
 
       assert compare_versions(glibc, @target_glibc) in [:lt, :eq],
              "#{@deploy_workflow}: #{image} has glibc #{glibc}, newer than the " <>
                "deployment target's #{@target_glibc} (#{@target_os}). The release " <>
                "would build and upload, then fail to start on the VM."
+    end
+
+    # glibc is not the only ABI the release inherits from the build machine. The
+    # bundled ERTS carries the crypto NIF, which links the runner's OpenSSL
+    # soname, so an image with an older glibc but `libcrypto.so.1.1` would pass
+    # the ordering above and still fail on a target that ships only
+    # `libcrypto.so.3` - same symptom class, different axis. Sonames do not
+    # order, so the runner's must be one the target actually provides.
+    test "builds on a runner whose OpenSSL soname the deployment target provides" do
+      image = runs_on(read(@deploy_workflow))
+      libcrypto = verified_abi(@deploy_workflow, image).libcrypto
+
+      assert libcrypto == @target_libcrypto,
+             "#{@deploy_workflow}: #{image} links its crypto NIF against " <>
+               "#{libcrypto}, which the deployment target does not provide - " <>
+               "#{@target_os} ships #{@target_libcrypto}. The release would build " <>
+               "and upload, then fail to start on the VM."
     end
 
     test "records in-file why the runner is pinned and that the pin will expire" do
@@ -138,7 +164,7 @@ defmodule Notable.Deploy.DeployWorkflowTest do
       builders =
         @deploy_workflow
         |> Path.dirname()
-        |> Path.join("*.yml")
+        |> Path.join("*.{yml,yaml}")
         |> Path.wildcard()
         |> Enum.filter(&(workflow_steps(File.read!(&1)) =~ "mix release"))
 
@@ -221,7 +247,10 @@ defmodule Notable.Deploy.DeployWorkflowTest do
     end
 
     test "does not build anything, because rollback reuses what is on the box" do
-      workflow = read(@rollback_workflow)
+      # Comments stripped, as in the builders test: this asserts what the
+      # workflow runs, and its prose explains why its runner pin is not
+      # load-bearing.
+      workflow = workflow_steps(read(@rollback_workflow))
 
       refute workflow =~ "mix release"
       refute workflow =~ "mix assets.deploy"
@@ -290,6 +319,19 @@ defmodule Notable.Deploy.DeployWorkflowTest do
            "workflow declares no runs-on"
 
     image
+  end
+
+  # An image this test has no verified values for fails here rather than
+  # skipping the checks that depend on them.
+  defp verified_abi(path, image) do
+    assert Map.has_key?(@runner_abi, image),
+           "#{path}: runs-on is #{image}, whose ABI values this test does not know. " <>
+             "Look up that image's glibc (its Ubuntu release's libc6 version) and the " <>
+             "OpenSSL soname it ships, add both to @runner_abi with their source, and " <>
+             "check whether any other ABI the build inherits also has to be recorded " <>
+             "before pinning it."
+
+    @runner_abi[image]
   end
 
   # glibc versions are `major.minor`, not semver, so compare them numerically

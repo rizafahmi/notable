@@ -539,3 +539,4 @@ Architecture decisions live under [docs/decisions](file:///Users/riza/code/donat
 - [ADR-023: Pivot From Donation-First To Feedback-First With Optional Tips](decisions/ADR-023-pivot-feedback-first-with-optional-tips.md)
 - [ADR-024: Add A Secondary Public Q&A Questions Board](decisions/ADR-024-secondary-public-qa-questions-board.md)
 - [ADR-025: Build Releases In GitHub Actions And Ship The Artifact To The VM](decisions/ADR-025-build-releases-in-github-actions.md)
+- [ADR-026: Pin The Deploy Runner To An Image The Target's glibc Can Execute](decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md)

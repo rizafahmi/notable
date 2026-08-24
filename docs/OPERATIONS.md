@@ -190,19 +190,27 @@ The deployment target of record:
 |---|---|
 | OS | Debian GNU/Linux 12 (bookworm) |
 | glibc | 2.36 (`ldd (Debian GLIBC 2.36-9+deb12u14) 2.36`) |
+| OpenSSL soname | `libcrypto.so.3` (`libssl3` 3.0.20-1~deb12u2; no `libssl1.1` package) |
 | Architecture | x86_64 |
 
-`mix release` bundles ERTS, which is why the VM needs no Erlang or Elixir - but the bundled `beam.smp` is dynamically linked against the **build machine's** glibc, and glibc is forward-compatible only.
-A binary built against glibc 2.39 runs on 2.39 and later; it cannot run on 2.36.
+`mix release` bundles ERTS, which is why the VM needs no Erlang or Elixir - but that bundle is built against the **build machine's** libraries, and it has to keep working against the VM's.
+`beam.smp` is dynamically linked against the build machine's glibc, and glibc is forward-compatible only: a binary built against glibc 2.39 runs on 2.39 and later, and cannot run on 2.36.
+The bundled ERTS also carries the crypto NIF, which links the build machine's OpenSSL by soname - and sonames do not order, so `libcrypto.so.1.1` and `libcrypto.so.3` are simply different libraries.
 
-**The rule: the deploy runner's glibc must be `<=` the target's glibc, and the runner image must be pinned explicitly, never a floating `-latest` label.**
+**The rule: no ABI the deploy runner builds against may exceed what the target provides, and the runner image must be pinned explicitly, never a floating `-latest` label.**
 
-| Runner image | glibc | Runs on this VM? |
-|---|---|---|
-| `ubuntu-22.04` | 2.35 | yes - current pin |
-| `ubuntu-24.04` (= `ubuntu-latest` today) | 2.39 | **no** |
+Two axes have been verified to matter, and they are what the checks below cover: the runner's **glibc must be `<=` the target's**, and the runner's **OpenSSL soname must be one the target ships**.
+That list is what has been *checked*, not a guarantee of what exists. If you are re-pinning, check the new image on both axes and look for others - the outage this section documents happened because a partial compatibility check had been written down as though it were the whole one.
 
-The distribution name is not the constraint; only the version number is. A Debian target and an Ubuntu runner are fine, provided the numbers order correctly.
+| Runner image | glibc | OpenSSL soname | Runs on this VM? |
+|---|---|---|---|
+| `ubuntu-22.04` | 2.35 | `libcrypto.so.3` | yes - current pin |
+| `ubuntu-24.04` (= `ubuntu-latest` today) | 2.39 | `libcrypto.so.3` | **no** - glibc 2.39 > 2.36 |
+| `ubuntu-20.04` (retired by GitHub) | 2.31 | `libcrypto.so.1.1` | **no** - glibc would pass, the soname does not |
+
+That last row is why the rule is not stated as glibc alone: an older glibc is not on its own enough.
+
+The distribution name is not the constraint. A Debian target and an Ubuntu runner are fine, provided every axis you have checked lines up.
 
 #### If a deploy fails with `GLIBC_... not found`
 
@@ -215,15 +223,15 @@ deploy: error: migration failed; /opt/notable/current was left untouched
 
 The site is **not** down from this. Migrations run before the symlink swap, so `current` still points at the previous release and the never-activated one is removed. Nothing needs rolling back.
 
-The cause is a build/target glibc mismatch. Check `runs-on:` in [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) against the table above, and check the runner image the failing run actually used (the job log's "Runner Image" group, and the `erlef/setup-beam` line that names the OTP build - `built on amd64/ubuntu-24.04` means the build's glibc came from 24.04). Re-pin to an image whose glibc is `<=` 2.36 and dispatch again.
+The cause is a build/target glibc mismatch. (A `libcrypto.so.*: cannot open shared object file` failure at the same step is the OpenSSL-soname version of the same problem, and the same table applies.) Check `runs-on:` in [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) against the table above, and check the runner image the failing run actually used (the job log's "Runner Image" group, and the `erlef/setup-beam` line that names the OTP build - `built on amd64/ubuntu-24.04` means the build's glibc came from 24.04). Re-pin to an image whose glibc is `<=` 2.36 and whose OpenSSL soname is `libcrypto.so.3`, and dispatch again.
 
 #### This pin expires
 
 GitHub retires runner images - `ubuntu-20.04` is already gone from the [actions/runner-images](https://github.com/actions/runner-images) table - and Ubuntu 22.04 leaves standard LTS support in April 2027.
 `ubuntu-latest` keeps moving too; Ubuntu 26.04 is already in preview.
-When `ubuntu-22.04` goes away, Deploy will fail at build time, before anything reaches the VM. The options then are: pin the newest remaining image whose glibc is still `<=` the VM's, upgrade the VM's Debian release first and then the runner, or build in a container matching the target (`hexpm/elixir:<ver>-erlang-<ver>-debian-bookworm-*`), which removes the runner-image dependency for good.
+When `ubuntu-22.04` goes away, Deploy will fail at build time, before anything reaches the VM. The options then are: pin the newest remaining image that still satisfies the rule on every axis, upgrade the VM's Debian release first and then the runner, or build in a container matching the target (`hexpm/elixir:<ver>-erlang-<ver>-debian-bookworm-*`), which removes the runner-image dependency for good.
 
-The rule is asserted in [test/notable/deploy/deploy_workflow_test.exs](../test/notable/deploy/deploy_workflow_test.exs), which fails on a floating label, on an image whose glibc exceeds the target's, and on an image whose glibc it has no verified value for. Rationale: [ADR-026](decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md).
+The rule is asserted in [test/notable/deploy/deploy_workflow_test.exs](../test/notable/deploy/deploy_workflow_test.exs), which fails on a floating label, on an image whose glibc exceeds the target's, on an image whose OpenSSL soname the target does not ship, and on an image it has no verified values for. Its runner table carries the same two checked axes as the table above, so the two stay in step. Rationale: [ADR-026](decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md).
 
 [.github/workflows/rollback.yml](../.github/workflows/rollback.yml) is pinned to the same image for consistency only. It builds nothing and produces no artifact the VM executes, so its glibc never reaches the box.
 [.github/workflows/ci.yml](../.github/workflows/ci.yml) may keep floating on `ubuntu-latest`: it runs the quality gate and ships nothing to the VM.

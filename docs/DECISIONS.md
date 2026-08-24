@@ -3,13 +3,13 @@
 This is a lightweight decision log (what/why/when). For detailed context and alternatives, see the ADRs in [docs/decisions](file:///Users/riza/code/donatex/docs/decisions).
 
 ## 2026-08-24: Pin The Deploy Runner To An Image The Target's glibc Can Execute (ADR-026)
-- Reason: `mix release` bundles ERTS linked against the build machine's glibc, and glibc is forward-compatible only. `ubuntu-latest` rolled to Ubuntu 24.04 (glibc 2.39) while the VM stayed on Debian 12 (glibc 2.36), so a deploy built cleanly and then died on the VM with `GLIBC_2.38' not found`. The deploy runner is now pinned to `ubuntu-22.04` (glibc 2.35), and the rule - runner glibc `<=` target glibc, never a floating `-latest` label - is asserted in `test/notable/deploy/deploy_workflow_test.exs` instead of a specific image. Pinned images are eventually retired, so this needs revisiting.
+- Reason: `mix release` bundles ERTS linked against the build machine's glibc, and glibc is forward-compatible only. `ubuntu-latest` rolled to Ubuntu 24.04 (glibc 2.39) while the VM stayed on Debian 12 (glibc 2.36), so a deploy built cleanly and then died on the VM with `GLIBC_2.38' not found`. The deploy runner is now pinned to `ubuntu-22.04` (glibc 2.35), and the rule - no ABI the runner builds against may exceed what the target provides, never a floating `-latest` label - is asserted in `test/notable/deploy/deploy_workflow_test.exs` instead of a specific image. glibc and the OpenSSL soname are the axes checked so far, not a closed list. Pinned images are eventually retired, so this needs revisiting.
 - Amends: [ADR-025](decisions/ADR-025-build-releases-in-github-actions.md), whose build/target compatibility bullet was wrong; the rest of ADR-025 stands.
 - Reference: [ADR-026](decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md)
 
 ## 2026-07-30: Build Releases In GitHub Actions And Ship The Artifact To The VM (ADR-025)
 - Reason: Building on the free-tier VM competes with the live BEAM for 1 GB of RAM; build the release on a GitHub Actions runner and deploy by hand (`workflow_dispatch` only) until the automation has been watched in production.
-- Amended by: [ADR-026](decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md) - the runner is pinned to `ubuntu-22.04`, not `ubuntu-latest`, because the build's glibc must not exceed the VM's.
+- Amended by: [ADR-026](decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md) - the runner is pinned to `ubuntu-22.04`, not `ubuntu-latest`, because what the build links against must not exceed what the VM provides.
 - Reference: [ADR-025](decisions/ADR-025-build-releases-in-github-actions.md)
 
 ## 2026-07-25: Add A Secondary Public Q&A Questions Board (ADR-024)

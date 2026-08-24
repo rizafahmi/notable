@@ -178,6 +178,15 @@ Still not verified from here, and unchanged by this fix: nothing was run against
 
 One incidental fix: the "digests assets before building the release" assertion searched the workflow's raw text, so it could be satisfied or broken by a comment. It now strips comment lines and asserts the order of the steps that actually run.
 
+**Review follow-up, same day.** Four review findings were taken and fixed:
+
+- The guard modelled runner compatibility as glibc alone. The bundled ERTS also carries the crypto NIF, which links the *runner's* OpenSSL soname, so an image with an older glibc but `libcrypto.so.1.1` (Ubuntu 20.04) would have satisfied the ordering and still failed to start on this VM, which ships `libssl3` and no `libssl1.1`. The runner table is now `@runner_abi`, holding glibc **and** the OpenSSL soname per image, and a second assertion checks the soname against the target's `libcrypto.so.3` the way glibc is checked. An image with no verified entry still fails rather than passing unchecked, on both axes. Today's `ubuntu-22.04` pin satisfies both (glibc 2.35 <= 2.36; `libcrypto.so.3`), so the pin itself is unchanged.
+- ADR-026, `docs/OPERATIONS.md`, `docs/DECISIONS.md` and `AGENTS.md` said the version number was "the whole constraint" - the same over-claiming that made ADR-025's bullet wrong. They now state the general rule (no ABI the runner builds against may exceed what the target provides) with glibc and the OpenSSL soname as the instances **checked so far**, and say plainly that the list is what has been checked rather than what exists.
+- The "exactly one workflow builds a release" guard globbed `*.yml` only, so a `release.yaml` would have escaped it. It now globs `*.{yml,yaml}`.
+- The rollback "does not build anything" assertion ran against raw file text, the hazard `workflow_steps/1` was introduced to remove. It now strips comments too, so extending rollback.yml's prose cannot fail it spuriously.
+
+`ADR-026` was also added to the sequential ADR index in `docs/ARCHITECTURE.md`, which it had been missing from.
+
 ## Files
 
 | Path | Role |

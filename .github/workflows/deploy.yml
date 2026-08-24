@@ -49,6 +49,12 @@ jobs:
     # (glibc 2.39) and deploy run 32682797726 built cleanly, uploaded, and then
     # died on the VM with `GLIBC_2.38' not found` while running migrations.
     #
+    # glibc is not the only ABI the release inherits from this runner: the
+    # bundled ERTS crypto NIF links the runner's OpenSSL soname too, and both
+    # Ubuntu 22.04 and Debian 12 ship libcrypto.so.3. Those are the axes that
+    # have been checked, not a complete list of the ones that exist - when
+    # re-pinning, check for others rather than assuming these two close it.
+    #
     # This pin will need revisiting: GitHub retires runner images (ubuntu-20.04
     # is already gone), and Ubuntu 26.04 is in preview, so `ubuntu-latest` will
     # move again. When ubuntu-22.04 is retired, pick the newest available image
