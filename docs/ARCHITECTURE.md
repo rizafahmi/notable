@@ -536,3 +536,6 @@ Architecture decisions live under [docs/decisions](file:///Users/riza/code/donat
 - [ADR-020: Use Basic Auth For Admin Access In MVP](file:///Users/riza/code/donatex/docs/decisions/ADR-020-admin-basic-auth-for-mvp.md)
 - [ADR-021: Use A Non-Guessable Token Route For Overlay Access](file:///Users/riza/code/donatex/docs/decisions/ADR-021-non-guessable-overlay-token-route.md)
 - [ADR-022: Remove Overlay Token Route](file:///Users/riza/code/donatex/docs/decisions/ADR-022-remove-overlay-token-route.md)
+- [ADR-023: Pivot From Donation-First To Feedback-First With Optional Tips](decisions/ADR-023-pivot-feedback-first-with-optional-tips.md)
+- [ADR-024: Add A Secondary Public Q&A Questions Board](decisions/ADR-024-secondary-public-qa-questions-board.md)
+- [ADR-025: Build Releases In GitHub Actions And Ship The Artifact To The VM](decisions/ADR-025-build-releases-in-github-actions.md)

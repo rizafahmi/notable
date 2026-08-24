@@ -2,6 +2,10 @@
 
 This is a lightweight decision log (what/why/when). For detailed context and alternatives, see the ADRs in [docs/decisions](file:///Users/riza/code/donatex/docs/decisions).
 
+## 2026-07-30: Build Releases In GitHub Actions And Ship The Artifact To The VM (ADR-025)
+- Reason: Building on the free-tier VM competes with the live BEAM for 1 GB of RAM; build the release on `ubuntu-latest` and deploy by hand (`workflow_dispatch` only) until the automation has been watched in production.
+- Reference: [ADR-025](decisions/ADR-025-build-releases-in-github-actions.md)
+
 ## 2026-07-25: Add A Secondary Public Q&A Questions Board (ADR-024)
 - Reason: Audience questions and anonymous upvotes are a distinct interaction from donation/feedback; model them as a separate bounded context with its own tables and a secondary `/questions` public route plus an authenticated `/admin/questions` moderation page.
 - Reference: [ADR-024](file:///Users/riza/code/donatex/docs/decisions/ADR-024-secondary-public-qa-questions-board.md)

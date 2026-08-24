@@ -29,7 +29,9 @@ With the default `.env.example` values, the local surfaces are:
 
 ## Environment Variables
 
-These values are expected to be provided via environment variables. In development, the intended workflow is `source .env` before starting the server. In production, set these variables in your process manager / container environment (do not rely on `.env` files).
+These values are expected to be provided via environment variables.
+In development, the intended workflow is `source .env` before starting the server.
+In production, set them in the systemd `EnvironmentFile` on the VM (see [Deployment](#deployment)); do not rely on a checked-in `.env` file, and do not have the deploy overwrite that file.
 
 ### Application URLs
 
@@ -99,7 +101,7 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace_me_with_a_strong_password
 ```
 
-Keep this file readable only by root (or the app user if your process manager requires it).
+Keep this file readable only by root and the release user.
 
 ## Public URLs (What To Copy Into OBS / Mayar)
 
@@ -155,37 +157,251 @@ If Mayar `POST /qrcode/create` omits `transactionId`/`id`, Notable performs a fo
 - Keep `/webhooks/mayar/:token` URLs private; treat the token as a secret.
 - If you change `NOTABLE_BASE_URL` (or its temporary `DONATEX_BASE_URL` alias), ensure it matches the URL users actually load in browsers (LiveView origin checks use it).
 
-## GCP Free Tier Deployment (Single VM)
+## Deployment
 
-This project can be deployed following the “single server, no Docker” approach in:
+Notable runs on a single Linux VM as a `mix release` supervised by `systemd`, per [ADR-019](decisions/ADR-019-deployment-strategy-gcp-free-tier-releases.md).
+The release is built by GitHub Actions and shipped to the VM over SSH, per [ADR-025](decisions/ADR-025-build-releases-in-github-actions.md).
 
-- `https://damonvjanis.medium.com/optimizing-for-free-hosting-elixir-deployments-6bfc119a1f44`
+The automated flow below is the primary path.
+The [manual fallback](#manual-deployment-fallback) is retained for when GitHub Actions is unavailable.
+Mechanism lives in [scripts/deploy/remote_deploy.sh](../scripts/deploy/remote_deploy.sh); this section states intent, inputs, and the guarantees that hold.
 
-Notable differs from the article’s example in one major way: Notable uses SQLite (a local file) instead of Postgres. On GCP, use a persistent disk (the default boot disk is already persistent) and set `DATABASE_PATH` to an absolute path on that disk.
+### What A Deploy Does
 
-### High-level Checklist
+[.github/workflows/deploy.yml](../.github/workflows/deploy.yml) builds the release on an `ubuntu-latest` runner, then [scripts/deploy/ssh_deploy.sh](../scripts/deploy/ssh_deploy.sh) uploads it and invokes [scripts/deploy/remote_deploy.sh](../scripts/deploy/remote_deploy.sh) on the VM.
 
-1. Provision a free-tier VM (Ubuntu) and point your domain DNS at the VM’s static IP.
-2. Install Erlang/Elixir for the versions used by this repo.
-3. Ensure HTTPS termination exists (Caddy, nginx, or a managed load balancer).
-4. Forward ports 80/443 to the Phoenix port (or run Phoenix on 443 directly).
-5. Create a deploy user + configure SSH access.
-6. Put secrets/env vars on the VM (systemd drop-in, env file readable only by root, or equivalent).
-7. Build and run a release, then manage it via systemd.
-8. Back up SQLite regularly (see [SQLite Notes](#sqlite-notes); WAL adds `-wal`/`-shm` companions).
+Observable behaviour:
 
-### Release Commands
+- Migrations run before the `current` symlink swaps to the new release.
+- The symlink swap precedes the systemd restart.
+- Retention is bounded, with a floor of 2.
+- If the unit does not come up after the restart, the deploy rolls itself back.
 
-From the app directory on the VM:
+Those orderings and the database guards below are pinned by tests in [test/notable/deploy/](../test/notable/deploy/).
 
-- Build assets: `MIX_ENV=prod mix assets.deploy`
-- Build release: `MIX_ENV=prod mix release`
-- Run migrations: `_build/prod/rel/notable/bin/migrate`
-- Start server: `_build/prod/rel/notable/bin/server`
+### Triggering A Deploy
+
+Deploys are `workflow_dispatch` only.
+Nothing deploys on merge, on a tag, or on a schedule, because the target serves live donors and live payments.
+
+1. Push your change and let [.github/workflows/ci.yml](../.github/workflows/ci.yml) go green on `main`. The deploy workflow does not re-run the quality gate.
+2. Open **Actions → Deploy → Run workflow**.
+3. Leave `ref` as `main`, or enter a specific branch, tag, or SHA to deploy something else.
+4. Watch the run. The final log lines name the release id that went live.
+
+The same thing from the CLI:
+
+```bash
+gh workflow run deploy.yml --field ref=main
+gh run watch
+```
+
+Deploy and rollback share one concurrency group, so two runs can never fight over the `current` symlink.
+
+### Required Secrets And Variables
+
+Create these under **Settings → Secrets and variables → Actions**.
+Nothing about the machine is committed to this repository, so a deploy fails fast and loudly until every required entry exists.
+
+Secrets (masked in logs):
+
+| Name | Example | What it is |
+| --- | --- | --- |
+| `DEPLOY_SSH_HOST` | `34.101.0.7` | Hostname or IP that Actions connects to. |
+| `DEPLOY_SSH_USER` | `deployer` | SSH login user on the VM. |
+| `DEPLOY_SSH_KEY` | `-----BEGIN OPENSSH PRIVATE KEY-----\n…` | Private half of the deploy key, whole file including the trailing newline. |
+| `DEPLOY_SSH_KNOWN_HOSTS` | `34.101.0.7 ssh-ed25519 AAAAC3NzaC1…` | Output of `ssh-keyscan <host>`, pinning the VM's host key so the deploy cannot be redirected. |
+
+Variables (visible in logs, and none of them are secret):
+
+| Name | Example | What it is |
+| --- | --- | --- |
+| `DEPLOY_ROOT` | `/opt/notable` | Release root on the VM. Holds `releases/`, `incoming/`, `bin/`, and the `current` symlink. |
+| `DEPLOY_SYSTEMD_UNIT` | `notable.service` | The unit the deploy restarts. |
+| `DEPLOY_DATABASE_PATH` | `/var/lib/notable/notable.db` | Where SQLite lives. Must be outside `DEPLOY_ROOT`. |
+| `DEPLOY_ENV_FILE` | `/etc/notable/notable.env` | The runtime environment file. Owned by you. The deploy passes its path to systemd and never writes, templates, or replaces it. |
+| `DEPLOY_RELEASE_USER` | `notable` | Optional. User the unpacked release is chowned to, and that migrations run as. |
+| `DEPLOY_KEEP_RELEASES` | `5` | Optional, default `5`, minimum `2`. How many release directories to retain. |
+| `DEPLOY_SSH_PORT` | `22` | Optional, default `22`. |
+
+The workflows also reference a `production` GitHub environment.
+It is created automatically on the first run.
+Adding a required reviewer to it is the cheapest way to put a human approval in front of every deploy, and it is worth doing before switching to deploy on merge.
+
+### One-Time VM Setup
+
+The deploy creates `releases/`, `incoming/`, `bin/`, and the `current` symlink under `DEPLOY_ROOT`.
+`DEPLOY_ROOT` itself, the env file, and the database must already exist:
+
+```
+/opt/notable/                     # DEPLOY_ROOT (must pre-exist)
+  bin/remote_deploy.sh            # re-uploaded on every run
+  incoming/                       # upload staging, cleared after each deploy
+  releases/20260730T101500Z-a1b2c3d/
+  current -> releases/20260730T101500Z-a1b2c3d
+/etc/notable/notable.env          # DEPLOY_ENV_FILE, yours, never written by the deploy
+/var/lib/notable/notable.db       # DEPLOY_DATABASE_PATH, outside DEPLOY_ROOT
+```
+
+1. Create the deploy user and add the deploy key's public half to its `~/.ssh/authorized_keys`.
+2. `sudo mkdir -p /opt/notable && sudo chown deployer /opt/notable`.
+3. Create `/etc/notable/notable.env` from the [example env file](#example-production-env-file) and keep it readable only by root and the release user.
+4. Create the database directory: `sudo mkdir -p /var/lib/notable && sudo chown notable /var/lib/notable`.
+5. Install the systemd unit shown under [systemd (Example)](#systemd-example) and `sudo systemctl enable notable`.
+6. Grant the deploy user the privileges below.
+
+The deploy needs to restart the unit, query its state, run migrations through `systemd-run`, chown the unpacked release, and remove old release directories:
+
+```
+deployer ALL=(root) NOPASSWD: /usr/bin/systemctl restart notable.service, \
+                              /usr/bin/systemctl is-active *, \
+                              /usr/bin/systemd-run *, \
+                              /usr/bin/chown -R notable /opt/notable/releases/*, \
+                              /usr/bin/rm -rf /opt/notable/releases/*
+```
+
+Be clear-eyed about what that grants: `systemd-run *` can start a unit as any user with any command, so it is root-equivalent.
+The deploy key is therefore a root credential on that box no matter how the sudoers line is written, and it should be treated as one.
+If you would rather SSH as root, set `DEPLOY_SSH_USER` to `root` and leave the default `sudo -n` prefix in place.
+That path assumes `sudo` is installed on the VM, so a missing `sudo` fails loudly instead of silently changing privilege behaviour.
+
+Migrations run through `systemd-run` so the secrets in `DEPLOY_ENV_FILE` are applied by systemd and never enter the deploy script's own process.
+Database location guarantees that do not depend on reading that file are under [The Database Is Never Touched](#the-database-is-never-touched).
+
+### Rolling Back
+
+Rollback is a symlink swap and a restart, driven by [.github/workflows/rollback.yml](../.github/workflows/rollback.yml).
+It builds nothing, and every release it can select is already unpacked on the VM, so it completes in seconds.
+
+Run **Actions → Rollback → Run workflow**, or:
+
+```bash
+gh workflow run rollback.yml
+```
+
+Leaving `release_id` empty selects the newest release strictly older than the one currently live.
+Dispatching it again walks one step further back rather than bouncing between the last two releases.
+To jump to a specific release, pass its directory name:
+
+```bash
+gh workflow run rollback.yml --field release_id=20260729T084500Z-9f8e7d6
+```
+
+Rollback deliberately does not run migrations.
+Reversing a schema change is a manual decision, not a side effect of moving a symlink, so a rollback across a destructive migration needs you to think about the data first.
+
+A failed deploy rolls itself back: if the unit does not come up after the restart, the deploy re-points `current` at the previous release, restarts, and then exits non-zero.
+You do not need to race it.
+
+### Retention And Pruning
+
+Retention is bounded, with a floor of 2 on `DEPLOY_KEEP_RELEASES`.
+How candidates are chosen and removed is owned by [scripts/deploy/remote_deploy.sh](../scripts/deploy/remote_deploy.sh).
+
+To see what pruning would do without deleting anything:
+
+```bash
+ssh deployer@<host> "DEPLOY_ROOT=/opt/notable \
+  DEPLOY_DATABASE_PATH=/var/lib/notable/notable.db \
+  bash /opt/notable/bin/remote_deploy.sh prune-plan"
+```
+
+### The Database Is Never Touched
+
+The SQLite file lives at `DATABASE_PATH` outside the release directory, and nothing in the deploy path copies, moves, truncates, or deletes it or its `-wal` / `-shm` companions.
+
+Two guarantees hold:
+
+- Preflight refuses to deploy or roll back when the database, or a WAL companion, resolves inside `DEPLOY_ROOT`.
+- Pruning refuses any candidate that contains or is contained by the database or its companions, and re-checks that guard immediately before the single `rm`.
+
+Backups remain your responsibility; see [SQLite Notes](#sqlite-notes).
+
+### Switching To Deploy On Merge
+
+The deploy workflow is manual on purpose while the flow is still new.
+When you want it to fire on every merge to `main`, add a `push` trigger next to `workflow_dispatch` in [.github/workflows/deploy.yml](../.github/workflows/deploy.yml):
+
+```yaml
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        ...
+```
+
+That is the whole edit.
+The `ref` input already falls back to `github.ref`, and the release id is derived from `github.sha`, so both triggers behave identically.
+Add a required reviewer to the `production` environment first if you want an automatic deploy to still pause for a human.
+
+Note that CI and Deploy are separate workflows, so a `push`-triggered deploy would start alongside `mix ci` rather than after it.
+If you make the switch, either gate the deploy job on the CI workflow completing, or accept that a broken `main` can reach the box and rely on the automatic rollback.
+
+### Manual Deployment Fallback
+
+Use this when GitHub Actions is unavailable.
+It performs the same steps as the automation, by hand.
+
+Build somewhere that is not the VM (a free-tier box is too small to build an Elixir release reliably):
+
+```bash
+MIX_ENV=prod mix deps.get --only prod
+MIX_ENV=prod mix assets.setup
+MIX_ENV=prod mix assets.deploy
+MIX_ENV=prod mix release
+release_id="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short=7 HEAD)"
+tar -czf "/tmp/${release_id}.tar.gz" -C _build/prod/rel/notable .
+```
+
+Then drive the same script the automation uses, so the ordering and the database guards still apply:
+
+```bash
+RELEASE_ID="$release_id" \
+RELEASE_ARCHIVE="/tmp/${release_id}.tar.gz" \
+DEPLOY_SSH_HOST=<host> \
+DEPLOY_SSH_USER=deployer \
+DEPLOY_SSH_KEY_FILE=~/.ssh/notable_deploy \
+DEPLOY_SSH_KNOWN_HOSTS_FILE=~/.ssh/known_hosts \
+DEPLOY_ROOT=/opt/notable \
+DEPLOY_SYSTEMD_UNIT=notable.service \
+DEPLOY_DATABASE_PATH=/var/lib/notable/notable.db \
+DEPLOY_ENV_FILE=/etc/notable/notable.env \
+DEPLOY_RELEASE_USER=notable \
+  scripts/deploy/ssh_deploy.sh activate
+```
+
+These optional settings are `ssh_deploy.sh` / `remote_deploy.sh` knobs only.
+They are not GitHub Actions variables, and the workflows do not forward them:
+
+| Name | Default | What it is |
+| --- | --- | --- |
+| `DEPLOY_PRIVILEGED_CMD` | `sudo -n` | Command prefix for `systemctl`, `systemd-run`, `chown`, and release-directory `rm`. Set only when you need a non-default prefix for a manual run. |
+| `DEPLOY_HEALTH_RETRIES` | `15` | How many `systemctl is-active` polls to make after a restart before treating the unit as failed. |
+| `DEPLOY_HEALTH_INTERVAL` | `2` | Seconds between those polls. |
+
+Rollback by hand is the same script:
+
+```bash
+… scripts/deploy/ssh_deploy.sh rollback
+```
+
+If SSH from your machine is also unavailable and you are on the box itself, the raw steps are:
+
+```bash
+sudo -u deployer tar -xzf /path/to/release.tar.gz -C /opt/notable/releases/<release-id>
+sudo /opt/notable/releases/<release-id>/bin/migrate     # with the env file applied
+sudo ln -sfn /opt/notable/releases/<release-id> /opt/notable/current
+sudo systemctl restart notable
+```
+
+Prefer the script: `ln -sfn` is not atomic, and the manual path has none of the database guards.
 
 ### systemd (Example)
 
-If you follow the article’s “release directory + current symlink” layout (e.g. `/opt/notable/current`), a minimal systemd unit can run the release `server` script:
+This unit matches the layout above.
+`WorkingDirectory` and `ExecStart` both point at `current`, so a symlink swap plus a restart is all a deploy needs.
 
 ```
 [Unit]
@@ -205,7 +421,29 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-### SQLite Notes
+### VM Provisioning Notes
+
+Notable follows the “single server, no Docker” approach in:
+
+- `https://damonvjanis.medium.com/optimizing-for-free-hosting-elixir-deployments-6bfc119a1f44`
+
+It differs from that article in one major way: Notable uses SQLite (a local file) instead of Postgres.
+On GCP, use a persistent disk (the default boot disk is already persistent) and set `DATABASE_PATH` to an absolute path on that disk.
+
+1. Provision a free-tier VM (Ubuntu) and point your domain DNS at the VM's static IP.
+2. Ensure HTTPS termination exists (Caddy, nginx, or a managed load balancer).
+3. Forward ports 80/443 to the Phoenix port (or run Phoenix on 443 directly).
+4. Create the deploy user and configure SSH access.
+5. Put secrets/env vars on the VM in the env file, readable only by root and the release user.
+6. Install the systemd unit and enable it.
+7. Back up SQLite regularly (see [SQLite Notes](#sqlite-notes); WAL adds `-wal`/`-shm` companions).
+
+Erlang and Elixir do **not** need to be installed on the VM.
+`mix release` bundles ERTS, and the release is built on the CI runner.
+The build runner's OS and architecture must be compatible with the VM's: `ubuntu-latest` x86_64 targeting a same-or-newer Ubuntu x86_64 VM.
+An arm64 VM, or a VM older than the runner image, needs either a matching runner or `include_erts` set to false with Erlang installed on the box.
+
+## SQLite Notes
 
 - Keep the database file outside the release directory so deploys don’t overwrite it.
 - Use an absolute path like `/var/lib/notable/notable.db` and ensure the directory exists and is writable by the app user.

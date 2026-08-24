@@ -50,6 +50,10 @@ This is weaker than signed webhooks because it does not provide message integrit
 - webhook retry/deduping behavior
 - overlay recovery behavior (`paid AND alerted = false`)
 - production env vars (`DATABASE_PATH`, `SECRET_KEY_BASE`, `PHX_HOST`, etc.)
+- the automated deploy: triggering it, the secrets and variables it needs, and how to roll back
+
+Deploys run from GitHub Actions and are triggered by hand (**Actions → Deploy → Run workflow**); nothing deploys on merge.
+Rollback is a separate dispatchable workflow that re-points the release symlink and restarts.
 
 ## Docs (for contributors)
 - Product: [PRD.md](docs/PRD.md)

@@ -1,0 +1,140 @@
+name: Deploy
+
+# Deliberately manual.
+#
+# This workflow ships to the single VM that serves real donors and real
+# payments, so it only ever runs when a human dispatches it. To switch to
+# deploy on merge later, add a `push` trigger alongside `workflow_dispatch`:
+#
+#   on:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+#       inputs:
+#         ...
+#
+# That is the whole edit. The `ref` input already falls back to `github.ref`,
+# and the release id is derived from `github.sha`, so both triggers behave the
+# same. Consider adding a required reviewer to the `production` environment
+# first, so an automatic deploy still pauses for a human.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build and deploy"
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+# One deploy at a time. Two runs racing for the `current` symlink could leave
+# the box pointing at a release whose migrations never ran.
+concurrency:
+  group: notable-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: build and deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      MIX_ENV: prod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # Same versions as .github/workflows/ci.yml. A release built against a
+      # different OTP than the gate that approved the code is not the artifact
+      # anybody reviewed.
+      - name: Set up Elixir
+        id: beam
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18.x"
+          otp-version: "27"
+
+      - name: Cache deps and build artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-prod-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-prod-mix-
+
+      - name: Install dependencies
+        run: mix deps.get --only prod
+
+      - name: Compile
+        run: mix compile --warnings-as-errors
+
+      - name: Install asset toolchain
+        run: mix assets.setup
+
+      - name: Build and digest assets
+        run: mix assets.deploy
+
+      - name: Build release
+        run: mix release --overwrite
+
+      # The release id doubles as the directory name on the VM, so it has to
+      # sort chronologically: rollback picks the newest release older than the
+      # current one, and that rule is only correct if names sort by age.
+      - name: Name the release
+        id: release
+        run: |
+          release_id="$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA::7}"
+          archive="${RUNNER_TEMP}/${release_id}.tar.gz"
+          tar -czf "$archive" -C _build/prod/rel/notable .
+          {
+            echo "id=${release_id}"
+            echo "archive=${archive}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: notable-release-${{ steps.release.outputs.id }}
+          path: ${{ steps.release.outputs.archive }}
+          retention-days: 14
+
+      - name: Write SSH credentials
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "${RUNNER_TEMP}/deploy_key"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "${RUNNER_TEMP}/known_hosts"
+          chmod 600 "${RUNNER_TEMP}/deploy_key" "${RUNNER_TEMP}/known_hosts"
+
+      # All the deploy logic lives in the script, which is unit tested in
+      # test/notable/deploy/. Inline YAML is not testable, so it stays thin.
+      - name: Deploy
+        env:
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+          DEPLOY_SSH_KEY_FILE: ${{ runner.temp }}/deploy_key
+          DEPLOY_SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/known_hosts
+          DEPLOY_ROOT: ${{ vars.DEPLOY_ROOT }}
+          DEPLOY_SYSTEMD_UNIT: ${{ vars.DEPLOY_SYSTEMD_UNIT }}
+          DEPLOY_DATABASE_PATH: ${{ vars.DEPLOY_DATABASE_PATH }}
+          DEPLOY_ENV_FILE: ${{ vars.DEPLOY_ENV_FILE }}
+          DEPLOY_RELEASE_USER: ${{ vars.DEPLOY_RELEASE_USER }}
+          DEPLOY_KEEP_RELEASES: ${{ vars.DEPLOY_KEEP_RELEASES }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          RELEASE_ARCHIVE: ${{ steps.release.outputs.archive }}
+        run: scripts/deploy/ssh_deploy.sh activate
+
+      - name: Remove SSH credentials
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/deploy_key" "${RUNNER_TEMP}/known_hosts"

@@ -1,0 +1,71 @@
+name: Rollback
+
+# The escape hatch for a bad deploy. It builds nothing: every release it can
+# select is already unpacked on the VM, so a rollback is a symlink swap and a
+# restart, and it completes in seconds rather than in a build.
+#
+# Leave `release_id` empty to fall back to the newest release older than the
+# one currently live. Set it to walk further back.
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: "Release directory to activate (empty = the previous release)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+# Shares a group with Deploy so a rollback cannot overlap a deploy that is
+# still moving the same symlink.
+concurrency:
+  group: notable-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: roll back
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Write SSH credentials
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "${RUNNER_TEMP}/deploy_key"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "${RUNNER_TEMP}/known_hosts"
+          chmod 600 "${RUNNER_TEMP}/deploy_key" "${RUNNER_TEMP}/known_hosts"
+
+      - name: Roll back
+        env:
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+          DEPLOY_SSH_KEY_FILE: ${{ runner.temp }}/deploy_key
+          DEPLOY_SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/known_hosts
+          DEPLOY_ROOT: ${{ vars.DEPLOY_ROOT }}
+          DEPLOY_SYSTEMD_UNIT: ${{ vars.DEPLOY_SYSTEMD_UNIT }}
+          DEPLOY_DATABASE_PATH: ${{ vars.DEPLOY_DATABASE_PATH }}
+          DEPLOY_ENV_FILE: ${{ vars.DEPLOY_ENV_FILE }}
+          DEPLOY_RELEASE_USER: ${{ vars.DEPLOY_RELEASE_USER }}
+          # Passed through the environment rather than interpolated into the
+          # command line, so a dispatch input can never become shell syntax.
+          ROLLBACK_RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          if [ -n "$ROLLBACK_RELEASE_ID" ]; then
+            scripts/deploy/ssh_deploy.sh rollback "$ROLLBACK_RELEASE_ID"
+          else
+            scripts/deploy/ssh_deploy.sh rollback
+          fi
+
+      - name: Remove SSH credentials
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/deploy_key" "${RUNNER_TEMP}/known_hosts"
