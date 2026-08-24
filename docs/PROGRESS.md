@@ -95,7 +95,7 @@
 ## Next Steps
 1. Notable rename remaining slice: GitHub repo rename ([#69](https://github.com/rizafahmi/donatex/issues/69)); close parent [#2](https://github.com/rizafahmi/donatex/issues/2) after that lands. Keep `DONATEX_*` env aliases until the captain says drop them.
 2. Merge open hardening PRs still awaiting review (#26 amount-fallback) as they land.
-3. Create the deploy secrets and variables listed in [OPERATIONS.md](OPERATIONS.md#required-secrets-and-variables), then dispatch **Actions → Deploy** once and watch it. Nothing in the repo can reach the VM until those exist.
+3. Dispatch **Actions → Deploy** again with the pinned `ubuntu-22.04` runner and watch it. The secrets and variables listed in [OPERATIONS.md](OPERATIONS.md#required-secrets-and-variables) already exist — the first dispatch reached the VM and failed only on the glibc mismatch.
 4. Verify production DNS cluster membership and that donor Presence totals propagate across nodes before making cross-node count claims.
 5. Run one final low-value live Mayar QRIS transaction against the deployed callback URL.
 6. Extend `Notable.WordCloud.Lexicon`'s blocklist if a live audience surfaces variants it misses — matching is exact-token, so inflected or misspelled forms pass through.
