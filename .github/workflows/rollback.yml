@@ -27,6 +27,11 @@ concurrency:
 jobs:
   rollback:
     name: roll back
+    # Not load-bearing, unlike the pin in deploy.yml. This workflow compiles
+    # nothing and produces no artifact the VM has to execute - it swaps a
+    # symlink over SSH - so its glibc never reaches the box. Pinned only to
+    # match Deploy, so both halves of the deployment path move together and a
+    # reader is not left wondering why one floats and one does not.
     runs-on: ubuntu-22.04
     environment: production
 

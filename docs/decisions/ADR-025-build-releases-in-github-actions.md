@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted.
+The runner-image constraint is amended by [ADR-026](ADR-026-pin-the-deploy-runner-to-the-target-glibc.md); everything else stands.
 
 ## Date
 
@@ -28,13 +29,16 @@ Deploy-on-merge is the usual default, but the target takes live payments and the
 
 ## Decision
 
-Build the release on an `ubuntu-latest` GitHub Actions runner and transfer the built artifact to the VM over SSH.
+Build the release on a GitHub Actions runner and transfer the built artifact to the VM over SSH.
+
+(As originally written this said "on an `ubuntu-latest` runner". The runner is now pinned - see [ADR-026](ADR-026-pin-the-deploy-runner-to-the-target-glibc.md).)
 
 - `MIX_ENV=prod mix assets.deploy` then `MIX_ENV=prod mix release`, on the same Elixir and OTP versions `.github/workflows/ci.yml` already pins.
 - The result is tarred, uploaded as a workflow artifact for 14 days, and `scp`ed to the VM.
 - Erlang and Elixir are no longer required on the VM at all: `mix release` bundles ERTS.
-- The build runner's OS and architecture must be compatible with the VM's (`ubuntu-latest` x86_64 targeting a same-or-newer Ubuntu x86_64 VM).
-  An arm64 VM or a VM older than the runner image needs either a matching runner or `include_erts` set to false with Erlang installed on the box.
+- ~~The build runner's OS and architecture must be compatible with the VM's (`ubuntu-latest` x86_64 targeting a same-or-newer Ubuntu x86_64 VM). An arm64 VM or a VM older than the runner image needs either a matching runner or `include_erts` set to false with Erlang installed on the box.~~
+
+  **This was wrong and it caused an outage on 2026-08-24.** The target is Debian 12, not Ubuntu, and it is *older* than the runner image, not newer. The constraint is not OS compatibility but glibc: `mix release` bundles ERTS linked against the build machine's glibc, and glibc is forward-compatible only, so the runner's glibc must be `<=` the target's. Replaced by [ADR-026](ADR-026-pin-the-deploy-runner-to-the-target-glibc.md), which records the real rule, the actual target (Debian 12, glibc 2.36, x86_64), and the pin that satisfies it. The architecture half of the sentence was correct and still holds: the runner and the VM must share an architecture (both x86_64).
 
 Deploys are `workflow_dispatch` only, not automatic on merge.
 
@@ -94,3 +98,4 @@ Observable deploy behaviour (mechanism in `scripts/deploy/remote_deploy.sh`):
 - Deploy and rollback share a concurrency group, so a rollback cannot overlap a deploy that is still moving the same symlink.
 - The manual checklist in `docs/OPERATIONS.md` is retained as an explicit fallback for when Actions is unavailable, and it drives the same scripts so the guards still apply.
 - ADR-019 is unchanged and still governs the runtime shape. This ADR only records where the build happens and how the deploy is triggered.
+- The runner image the build happens *on* is constrained by [ADR-026](ADR-026-pin-the-deploy-runner-to-the-target-glibc.md), which was written after this ADR's compatibility bullet turned out to be false in production.

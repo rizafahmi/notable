@@ -168,7 +168,8 @@ Mechanism lives in [scripts/deploy/remote_deploy.sh](../scripts/deploy/remote_de
 
 ### What A Deploy Does
 
-[.github/workflows/deploy.yml](../.github/workflows/deploy.yml) builds the release on an `ubuntu-latest` runner, then [scripts/deploy/ssh_deploy.sh](../scripts/deploy/ssh_deploy.sh) uploads it and invokes [scripts/deploy/remote_deploy.sh](../scripts/deploy/remote_deploy.sh) on the VM.
+[.github/workflows/deploy.yml](../.github/workflows/deploy.yml) builds the release on a pinned `ubuntu-22.04` runner, then [scripts/deploy/ssh_deploy.sh](../scripts/deploy/ssh_deploy.sh) uploads it and invokes [scripts/deploy/remote_deploy.sh](../scripts/deploy/remote_deploy.sh) on the VM.
+The runner image is pinned deliberately and must not be changed to `ubuntu-latest` - see [Build Runner And The Target's glibc](#build-runner-and-the-targets-glibc).
 
 Observable behaviour:
 
@@ -178,6 +179,62 @@ Observable behaviour:
 - If the unit does not come up after the restart, the deploy rolls itself back.
 
 Those orderings and the database guards below are pinned by tests in [test/notable/deploy/](../test/notable/deploy/).
+
+### Build Runner And The Target's glibc
+
+**The deploy runner is pinned to `ubuntu-22.04` on purpose. Do not change it to `ubuntu-latest`.**
+
+The deployment target of record:
+
+| | |
+|---|---|
+| OS | Debian GNU/Linux 12 (bookworm) |
+| glibc | 2.36 (`ldd (Debian GLIBC 2.36-9+deb12u14) 2.36`) |
+| OpenSSL soname | `libcrypto.so.3` (`libssl3` 3.0.20-1~deb12u2; no `libssl1.1` package) |
+| Architecture | x86_64 |
+
+`mix release` bundles ERTS, which is why the VM needs no Erlang or Elixir - but that bundle is built against the **build machine's** libraries, and it has to keep working against the VM's.
+`beam.smp` is dynamically linked against the build machine's glibc, and glibc is forward-compatible only: a binary built against glibc 2.39 runs on 2.39 and later, and cannot run on 2.36.
+The bundled ERTS also carries the crypto NIF, which links the build machine's OpenSSL by soname - and sonames do not order, so `libcrypto.so.1.1` and `libcrypto.so.3` are simply different libraries.
+
+**The rule: no ABI the deploy runner builds against may exceed what the target provides, and the runner image must be pinned explicitly, never a floating `-latest` label.**
+
+Two axes have been verified to matter, and they are what the checks below cover: the runner's **glibc must be `<=` the target's**, and the runner's **OpenSSL soname must be one the target ships**.
+That list is what has been *checked*, not a guarantee of what exists. If you are re-pinning, check the new image on both axes and look for others - the outage this section documents happened because a partial compatibility check had been written down as though it were the whole one.
+
+| Runner image | glibc | OpenSSL soname | Runs on this VM? |
+|---|---|---|---|
+| `ubuntu-22.04` | 2.35 | `libcrypto.so.3` | yes - current pin |
+| `ubuntu-24.04` (= `ubuntu-latest` today) | 2.39 | `libcrypto.so.3` | **no** - glibc 2.39 > 2.36 |
+| `ubuntu-20.04` (retired by GitHub) | 2.31 | `libcrypto.so.1.1` | **no** - glibc would pass, the soname does not |
+
+That last row is why the rule is not stated as glibc alone: an older glibc is not on its own enough.
+
+The distribution name is not the constraint. A Debian target and an Ubuntu runner are fine, provided every axis you have checked lines up.
+
+#### If a deploy fails with `GLIBC_... not found`
+
+Symptom, at the migration step, after the upload succeeded:
+
+```
+beam.smp: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
+deploy: error: migration failed; /opt/notable/current was left untouched
+```
+
+The site is **not** down from this. Migrations run before the symlink swap, so `current` still points at the previous release and the never-activated one is removed. Nothing needs rolling back.
+
+The cause is a build/target glibc mismatch. (A `libcrypto.so.*: cannot open shared object file` failure at the same step is the OpenSSL-soname version of the same problem, and the same table applies.) Check `runs-on:` in [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) against the table above, and check the runner image the failing run actually used (the job log's "Runner Image" group, and the `erlef/setup-beam` line that names the OTP build - `built on amd64/ubuntu-24.04` means the build's glibc came from 24.04). Re-pin to an image whose glibc is `<=` 2.36 and whose OpenSSL soname is `libcrypto.so.3`, and dispatch again.
+
+#### This pin expires
+
+GitHub retires runner images - `ubuntu-20.04` is already gone from the [actions/runner-images](https://github.com/actions/runner-images) table - and Ubuntu 22.04 leaves standard LTS support in April 2027.
+`ubuntu-latest` keeps moving too; Ubuntu 26.04 is already in preview.
+When `ubuntu-22.04` goes away, Deploy will fail at build time, before anything reaches the VM. The options then are: pin the newest remaining image that still satisfies the rule on every axis, upgrade the VM's Debian release first and then the runner, or build in a container matching the target (`hexpm/elixir:<ver>-erlang-<ver>-debian-bookworm-*`), which removes the runner-image dependency for good.
+
+The rule is asserted in [test/notable/deploy/deploy_workflow_test.exs](../test/notable/deploy/deploy_workflow_test.exs), which fails on a floating label, on an image whose glibc exceeds the target's, on an image whose OpenSSL soname the target does not ship, and on an image it has no verified values for. Its runner table carries the same two checked axes as the table above, so the two stay in step. Rationale: [ADR-026](decisions/ADR-026-pin-the-deploy-runner-to-the-target-glibc.md).
+
+[.github/workflows/rollback.yml](../.github/workflows/rollback.yml) is pinned to the same image for consistency only. It builds nothing and produces no artifact the VM executes, so its glibc never reaches the box.
+[.github/workflows/ci.yml](../.github/workflows/ci.yml) may keep floating on `ubuntu-latest`: it runs the quality gate and ships nothing to the VM.
 
 ### Triggering A Deploy
 
@@ -344,7 +401,8 @@ If you make the switch, either gate the deploy job on the CI workflow completing
 Use this when GitHub Actions is unavailable.
 It performs the same steps as the automation, by hand.
 
-Build somewhere that is not the VM (a free-tier box is too small to build an Elixir release reliably):
+Build somewhere that is not the VM (a free-tier box is too small to build an Elixir release reliably).
+Whatever you build on is subject to the same constraint as the deploy runner, because the release carries the build machine's ABI to the VM. Check it against [Build Runner And The Target's glibc](#build-runner-and-the-targets-glibc) first: a macOS laptop or a newer Linux distribution produces a release the VM cannot start.
 
 ```bash
 MIX_ENV=prod mix deps.get --only prod
@@ -430,7 +488,7 @@ Notable follows the “single server, no Docker” approach in:
 It differs from that article in one major way: Notable uses SQLite (a local file) instead of Postgres.
 On GCP, use a persistent disk (the default boot disk is already persistent) and set `DATABASE_PATH` to an absolute path on that disk.
 
-1. Provision a free-tier VM (Ubuntu) and point your domain DNS at the VM's static IP.
+1. Provision a free-tier VM and point your domain DNS at the VM's static IP. The current one is Debian 12; whatever it runs, its glibc constrains the build runner - see [Build Runner And The Target's glibc](#build-runner-and-the-targets-glibc).
 2. Ensure HTTPS termination exists (Caddy, nginx, or a managed load balancer).
 3. Forward ports 80/443 to the Phoenix port (or run Phoenix on 443 directly).
 4. Create the deploy user and configure SSH access.
@@ -440,8 +498,7 @@ On GCP, use a persistent disk (the default boot disk is already persistent) and 
 
 Erlang and Elixir do **not** need to be installed on the VM.
 `mix release` bundles ERTS, and the release is built on the CI runner.
-The build runner's OS and architecture must be compatible with the VM's: `ubuntu-latest` x86_64 targeting a same-or-newer Ubuntu x86_64 VM.
-An arm64 VM, or a VM older than the runner image, needs either a matching runner or `include_erts` set to false with Erlang installed on the box.
+That bundled ERTS is what makes the build runner's glibc matter - see [Build Runner And The Target's glibc](#build-runner-and-the-targets-glibc).
 
 ## SQLite Notes
 
