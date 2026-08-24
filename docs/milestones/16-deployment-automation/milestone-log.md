@@ -172,7 +172,7 @@ With the pin in place, 22 of 22 pass. The guard was also exercised against the t
 - `runs-on: ubuntu-24.04` (pinned, but too new) → *"ubuntu-24.04 has glibc 2.39, newer than the deployment target's 2.36 (Debian 12). The release would build and upload, then fail to start on the VM."*
 - `runs-on: ubuntu-26.04` (pinned, glibc unknown to the test) → fails, demanding a verified glibc value before that image may be used, rather than passing unchecked.
 
-`mix ci` after the change: 466 tests, 0 failures; credo `--strict` clean; dialyzer 0 errors; `ex_dna` 0 clones; architecture policy OK.
+`mix ci` measured at commit `bf564ff` (the fix commit, before the review follow-up below): 466 tests, 0 failures; credo `--strict` clean; dialyzer 0 errors; `ex_dna` 0 clones; architecture policy OK. That figure is **not** the final total for this branch — the review follow-up recorded below added tests after it was taken. The final total is deliberately left unstated here rather than computed: it will be recorded once `mix ci` is actually run, naming the commit it was measured at.
 
 Still not verified from here, and unchanged by this fix: nothing was run against the live host, and no credentials were sought. That a release built on `ubuntu-22.04` actually starts on the VM is a reasoned conclusion from the glibc ordering, not an observation. The next dispatch is the captain's.
 
