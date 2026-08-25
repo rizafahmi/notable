@@ -43,6 +43,22 @@ defmodule NotableWeb.FeedbackCloudLiveTest do
     |> Enum.map(fn [_, word] -> word end)
   end
 
+  # Ten words, every one of them at count 2, so the "equal counts must still
+  # look different" rules are actually exercised.
+  defp seed_equal_count_cloud! do
+    feedback!("materi bagus praktis jelas relevan")
+    feedback!("materi bagus praktis jelas relevan")
+    feedback!("santai runtut padat inspiratif seru")
+    feedback!("santai runtut padat inspiratif seru")
+  end
+
+  defp attribute_values(view, pattern) do
+    view
+    |> render()
+    |> then(&Regex.scan(pattern, &1))
+    |> Enum.map(fn [_, value] -> value end)
+  end
+
   describe "GET /cloud" do
     test "renders an opaque full-screen dark surface", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/cloud")
@@ -96,6 +112,126 @@ defmodule NotableWeb.FeedbackCloudLiveTest do
         {:ok, _view, html} = live(conn, unquote(path))
 
         assert length(Regex.scan(~r/<main[\s>]/, html)) == 1
+      end
+    end
+  end
+
+  describe "packed layout" do
+    test "the word list is driven by the layout hook, not by flex wrapping", %{conn: conn} do
+      seed_equal_count_cloud!()
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      assert has_element?(view, "#feedback-cloud-words[phx-hook='WordCloud']")
+      refute view |> element("#feedback-cloud-words") |> render() =~ "flex-wrap"
+    end
+
+    test "words stay real list items with their word and level attributes", %{conn: conn} do
+      seed_equal_count_cloud!()
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      assert has_element?(
+               view,
+               ~s(ul#feedback-cloud-words li[data-word="materi"][data-level="1"])
+             )
+    end
+
+    test "the hook is handed the words' geometry, never their colour", %{conn: conn} do
+      seed_equal_count_cloud!()
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      word = view |> element(~s([data-word="materi"])) |> render()
+
+      assert word =~ "font-size:"
+      assert word =~ "data-rotated="
+    end
+  end
+
+  describe "equal counts still look different" do
+    test "words with the same count render in several different colours", %{conn: conn} do
+      seed_equal_count_cloud!()
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      tones = view |> attribute_values(~r/(cloud-tone-\d+)/) |> Enum.uniq()
+
+      assert length(tones) >= 3
+    end
+
+    test "words with the same count render at several different sizes", %{conn: conn} do
+      seed_equal_count_cloud!()
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      sizes = view |> attribute_values(~r/font-size:\s*([\d.]+)rem/) |> Enum.uniq()
+
+      assert length(sizes) >= 3
+    end
+
+    test "a deterministic subset of words renders rotated", %{conn: conn} do
+      seed_equal_count_cloud!()
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      rotations = view |> attribute_values(~r/data-rotated="(\w+)"/) |> Enum.uniq() |> Enum.sort()
+
+      assert rotations == ["false", "true"]
+    end
+
+    test "both routes render a word identically", %{conn: conn} do
+      seed_equal_count_cloud!()
+
+      {:ok, page, _html} = live(conn, ~p"/cloud")
+      {:ok, overlay, _html} = live(conn, ~p"/cloud-overlay")
+
+      assert page |> attribute_values(~r/(cloud-tone-\d+)/) ==
+               overlay |> attribute_values(~r/(cloud-tone-\d+)/)
+
+      assert page |> attribute_values(~r/font-size:\s*([\d.]+)rem/) ==
+               overlay |> attribute_values(~r/font-size:\s*([\d.]+)rem/)
+    end
+
+    test "the smallest cloud — one repeated pair — still shows contrast", %{conn: conn} do
+      feedback!("materi bagus")
+      feedback!("materi bagus")
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      assert cloud_words(view) == ["materi", "bagus"]
+      assert view |> attribute_values(~r/(cloud-tone-\d+)/) |> Enum.uniq() |> length() == 2
+      assert attribute_values(view, ~r/data-rotated="(\w+)"/) == ["false", "true"]
+    end
+
+    test "colour does not move when a word's count grows", %{conn: conn} do
+      seed_equal_count_cloud!()
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      tone_of = fn v ->
+        v
+        |> element(~s([data-word="materi"]))
+        |> render()
+        |> then(&Regex.run(~r/cloud-tone-\d+/, &1))
+      end
+
+      before = tone_of.(view)
+
+      for _ <- 1..12, do: broadcast(feedback!("materi lagi"))
+
+      assert tone_of.(view) == before
+    end
+  end
+
+  describe "surface hygiene for the packed layout" do
+    for {label, path} <- [{"full-screen", "/cloud"}, {"OBS", "/cloud-overlay"}] do
+      test "the #{label} surface clips its own content so it never scrolls", %{conn: conn} do
+        seed_equal_count_cloud!()
+
+        {:ok, view, _html} = live(conn, unquote(path))
+
+        assert view |> element("#feedback-cloud") |> render() =~ "overflow-hidden"
       end
     end
   end

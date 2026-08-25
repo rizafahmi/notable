@@ -18,6 +18,17 @@ defmodule NotableWeb.FeedbackCloudLive do
   `status: "sent"`) for the **current Asia/Jakarta (WIB) day**, ranked by
   `Notable.WordCloud`, which enforces the two display-time safety rules — a
   word needs two distinct submissions, and blocklisted words never render.
+  How a word *looks* — its colour, its exact size and whether it stands
+  vertical — is decided by `Notable.WordCloud.Style` and rendered onto the
+  element as a class, a `font-size` and `data-rotated`. Where a word *sits* is
+  decided by the `WordCloud` hook in `assets/js/app.js`, which measures the
+  rendered text and packs it. Nothing about appearance is decided in
+  JavaScript; nothing about geometry is decided here.
+
+  Without JavaScript, or before the hook mounts, `.cloud-words` is still a
+  centred wrapping list, so the page degrades to something readable rather than
+  a heap of words at one point.
+
   Updates arrive on the existing `donations:created` topic, so feedback
   submitted during the closing minutes appears without a refresh. A long-lived
   OBS overlay also rolls at WIB midnight so yesterday's words leave assigns
@@ -128,27 +139,6 @@ defmodule NotableWeb.FeedbackCloudLive do
   defp surface_class(:overlay), do: nil
   defp surface_class(_action), do: "bg-background"
 
-  # Absolute size steps, so a word only grows when its own count crosses a
-  # threshold rather than whenever the busiest word gains a mention.
-  defp size_class(level) do
-    case level do
-      1 -> "text-4xl sm:text-5xl"
-      2 -> "text-5xl sm:text-6xl"
-      3 -> "text-6xl sm:text-7xl"
-      4 -> "text-7xl sm:text-8xl"
-      _ -> "text-8xl sm:text-9xl"
-    end
-  end
-
-  # Colour is decoration only: every word also states its count in text.
-  defp tone_class(level) do
-    case rem(level, 3) do
-      0 -> "text-accent-2"
-      1 -> "text-text"
-      _ -> "text-accent"
-    end
-  end
-
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
@@ -157,7 +147,7 @@ defmodule NotableWeb.FeedbackCloudLive do
         id="feedback-cloud"
         data-surface={surface(@live_action)}
         class={[
-          "relative flex min-h-dvh w-full flex-col items-center justify-center",
+          "relative flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden",
           "px-6 py-10 sm:px-12",
           surface_class(@live_action)
         ]}
@@ -180,17 +170,18 @@ defmodule NotableWeb.FeedbackCloudLive do
 
         <ul
           :if={@words != []}
-          class="flex max-w-[80vw] flex-wrap items-baseline justify-center gap-x-8 gap-y-4"
+          id="feedback-cloud-words"
+          phx-hook="WordCloud"
+          class="cloud-words"
         >
           <li
             :for={word <- @words}
+            id={"cloud-word-#{word.word}"}
             data-word={word.word}
             data-level={word.level}
-            class={[
-              "font-display font-bold leading-none tracking-tight",
-              size_class(word.level),
-              tone_class(word.level)
-            ]}
+            data-rotated={to_string(word.rotated)}
+            style={"font-size: #{word.font_size}rem"}
+            class={["cloud-word font-display font-bold tracking-tight", word.tone_class]}
           >
             {word.word}<span class="sr-only">, disebut {word.count} kali</span>
           </li>

@@ -13,6 +13,8 @@ colors:
   text-muted: "oklch(78% 0.02 240)" # Dimmed text
   success: "oklch(74% 0.12 185)" # Success cyan/green
   danger: "oklch(62% 0.18 25)" # Danger/error red-orange
+  accent-amber: "oklch(83% 0.15 85)" # Display-only: word cloud tone, never a control
+  accent-rose: "oklch(74% 0.17 350)" # Display-only: word cloud tone, never a control
 typography:
   display:
     fontFamily: "Notable Display, Fraunces, Georgia, serif" # authoritative stack: --font-display in assets/css/app.css
@@ -67,6 +69,14 @@ The color palette is built around deep, slate-tinted neutrals paired with glowin
 
 ### Secondary
 - **Livestream Purple** (oklch(64% 0.18 300)): Used for secondary accents, pending states, operator badges, and highlighting special options to create a visual hierarchy matching the live chat badges.
+
+### Display accents
+The `/cloud` word cloud paints each word in one of six tones so a room of equal-count words still reads as a cloud and not a wall. Four are the tokens above (text, cyan, purple, success); these two exist only to make six that stay distinguishable on a projector and over OBS:
+
+- **Console Amber** (`oklch(83% 0.15 85)`, `--color-accent-amber` / `text-accent-amber`): warm, bright, ~120° from cyan and ~145° from purple.
+- **Chat Rose** (`oklch(74% 0.17 350)`, `--color-accent-rose` / `text-accent-rose`): ~50° from purple and ~35° from danger, lighter than both.
+
+They are **display-only**. They are never used for buttons, states, badges or any interactive element — the Console Rarity Rule below still holds — and the word cloud is the only surface that may use them. Which tone a word gets is decided in `Notable.WordCloud.Style`, not in CSS.
 
 ### Neutral
 - **Deep Slate Void** (oklch(14% 0.015 240)): The primary background color of the application.

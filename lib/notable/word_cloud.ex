@@ -35,6 +35,7 @@ defmodule Notable.WordCloud do
   """
 
   alias Notable.WordCloud.Lexicon
+  alias Notable.WordCloud.Style
 
   @min_submissions 2
   @default_max_words 40
@@ -56,8 +57,10 @@ defmodule Notable.WordCloud do
   (**oldest-first**) order — that ordering is what makes the rendered layout
   stable. Entries may be `nil` or blank.
 
-  Returns a list of `%{word: String.t(), count: pos_integer, level: 1..5}` in
-  render order.
+  Returns a list of maps in render order, each carrying the word, its count,
+  its size `level` (1..5) and the appearance fields added by
+  `Notable.WordCloud.Style` — `:tone`, `:tone_class`, `:font_size` and
+  `:rotated`.
 
   ## Options
 
@@ -66,15 +69,22 @@ defmodule Notable.WordCloud do
   def build(submissions, opts \\ []) when is_list(submissions) do
     max_words = Keyword.get(opts, :max_words, @default_max_words)
 
+    # Every word of the day is styled, in first-appearance order, *before* the
+    # display threshold is applied: a word's appearance is decided against the
+    # words that appeared before it, and that history is append-only, so a word
+    # qualifying late cannot restyle the words already on screen.
     submissions
     |> first_appearances()
     |> tally()
-    |> Enum.filter(fn {_word, {count, _pos}} -> count >= @min_submissions end)
-    |> take_top(max_words)
     |> Enum.sort_by(fn {_word, {_count, pos}} -> pos end)
-    |> Enum.map(fn {word, {count, _pos}} ->
-      %{word: word, count: count, level: level_for(count)}
+    |> Enum.map(fn {word, {count, pos}} ->
+      %{word: word, count: count, level: level_for(count), position: pos}
     end)
+    |> Style.decorate_all()
+    |> Enum.filter(&(&1.count >= @min_submissions))
+    |> take_top(max_words)
+    |> Enum.sort_by(& &1.position)
+    |> Enum.map(&Map.delete(&1, :position))
   end
 
   @doc """
@@ -118,7 +128,7 @@ defmodule Notable.WordCloud do
   # fully determined by the input, never by map iteration order.
   defp take_top(entries, max_words) do
     entries
-    |> Enum.sort_by(fn {word, {count, pos}} -> {-count, pos, word} end)
+    |> Enum.sort_by(&{-&1.count, &1.position, &1.word})
     |> Enum.take(max_words)
   end
 
