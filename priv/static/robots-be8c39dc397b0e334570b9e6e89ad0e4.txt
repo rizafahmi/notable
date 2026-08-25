@@ -1,0 +1,21 @@
+# /robots.txt
+# Optimized for search engine indexing based on Google Search guidelines.
+
+User-agent: *
+Allow: /
+
+# Block admin, overlay, and webhook/private areas
+Disallow: /admin/
+Disallow: /admin
+Disallow: /overlay
+Disallow: /overlay/
+Disallow: /qr-overlay
+Disallow: /qr-overlay/
+Disallow: /cloud-overlay
+Disallow: /cloud-overlay/
+Disallow: /api/
+Disallow: /webhooks/
+Disallow: /private/
+Disallow: /dev/
+
+Sitemap: https://feedback.rizafahmi.com/sitemap.xml
