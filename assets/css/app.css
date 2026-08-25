@@ -485,8 +485,11 @@
 .cloud-tone-2 { color: var(--color-accent); }
 .cloud-tone-3 { color: var(--color-accent-2); }
 .cloud-tone-4 { color: var(--color-success); }
-.cloud-tone-5 { color: oklch(83% 0.15 85); }
-.cloud-tone-6 { color: oklch(74% 0.17 350); }
+.cloud-tone-5 { color: var(--color-danger); }
+/* Derived from two palette tokens rather than being a seventh brand colour:
+   mixing danger with accent-2 in OKLCH lands between their hues, which is far
+   enough from both to read as its own tone on the projector and over OBS. */
+.cloud-tone-6 { color: color-mix(in oklch, var(--color-danger) 50%, var(--color-accent-2) 50%); }
 
 .cloud-words {
   display: flex;

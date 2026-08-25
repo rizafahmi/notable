@@ -594,6 +594,9 @@ const CLOUD_PADDING = 4
 const CLOUD_RADIUS_STEP = 6
 const CLOUD_ARC_STEP = 9
 const CLOUD_MAX_RADIUS = 4000
+// How far a word that has grown may be nudged from where it already sat before
+// the packer gives up and re-seeds the search at the cloud's centre.
+const CLOUD_NEAR_RADIUS = 260
 // Horizontal stretch of the spiral, which is what makes the mass elliptical
 // rather than circular.
 const CLOUD_ASPECT = 1.75
@@ -689,9 +692,13 @@ Hooks.WordCloud = {
       this._placed.clear()
       pending = measured
     } else {
-      pending = measured.filter(item => {
+      pending = []
+      for (const item of measured) {
         const placed = this._placed.get(item.word)
-        if (!placed) return true
+        if (!placed) {
+          pending.push(item)
+          continue
+        }
         // The word's count crossed a size threshold, so the box it was placed
         // in no longer describes it. Re-place that one word, not the cloud.
         // Compared against the *measured* size, not the collision box: a
@@ -699,10 +706,15 @@ Hooks.WordCloud = {
         // comparing that would re-place every vertical word on every update.
         if (placed.measuredWidth !== item.width || placed.measuredHeight !== item.height) {
           this._placed.delete(item.word)
-          return true
+          // Carry where it already sat, so a word that grows on its third
+          // mention nudges within its neighbourhood instead of teleporting to
+          // whatever gap happens to be nearest the middle of the cloud.
+          pending.push({
+            ...item,
+            origin: {x: placed.x + placed.width / 2, y: placed.y + placed.height / 2}
+          })
         }
-        return false
-      })
+      }
     }
 
     if (pending.length === 0) {
@@ -717,12 +729,22 @@ Hooks.WordCloud = {
     const obstacles = Array.from(this._placed.values())
 
     for (const item of pending) {
-      const placement = this._spiral(item, obstacles)
+      const placement = this._spiral(item, obstacles, item.origin)
 
       if (!placement) {
         // Genuinely out of room next to what is already there. This is the one
         // case that earns moving words that are already on screen.
-        if (!repack) this._layout({repack: true})
+        if (!repack) {
+          this._layout({repack: true})
+          return
+        }
+
+        // A re-pack that still cannot place a word leaves `_placed` holding
+        // only part of the cloud. Render that partial state rather than
+        // returning, so the sheet never disagrees with what the hook believes
+        // is on screen — otherwise the next update packs the dropped words
+        // into space that is still visually occupied.
+        this._fit({allowGrow: true})
         return
       }
 
@@ -733,10 +755,15 @@ Hooks.WordCloud = {
     this._fit({allowGrow: repack})
   },
 
-  // Archimedean-ish search: ring by ring outwards from the origin, testing
+  // Archimedean-ish search: ring by ring outwards from a seed point, testing
   // evenly spaced candidates on each ring. n is at most `max_words`, so the
   // brute-force overlap test against every placed word stays cheap.
-  _spiral(item, obstacles) {
+  //
+  // `origin` is the centre a word already occupied, passed when the word has
+  // outgrown its box. It is searched first, within a short radius, so a growing
+  // word settles beside itself; only if that neighbourhood is full does the
+  // search fall back to the cloud's centre.
+  _spiral(item, obstacles, origin) {
     const width = item.rotated ? item.height : item.width
     const height = item.rotated ? item.width : item.height
 
@@ -755,27 +782,36 @@ Hooks.WordCloud = {
       ty: centreY - item.height / 2
     })
 
-    const centre = boxAt(0, 0)
-    if (!this._collides(centre, obstacles)) return centre
+    const search = (seedX, seedY, maxRadius) => {
+      const seed = boxAt(seedX, seedY)
+      if (!this._collides(seed, obstacles)) return seed
 
-    for (let radius = CLOUD_RADIUS_STEP; radius <= CLOUD_MAX_RADIUS; radius += CLOUD_RADIUS_STEP) {
-      const steps = Math.min(240, Math.max(16, Math.round((2 * Math.PI * radius) / CLOUD_ARC_STEP)))
-      // Rotate each ring by an irrational-ish amount so candidates from
-      // successive rings never line up into visible spokes.
-      const phase = radius * 0.137
+      for (let radius = CLOUD_RADIUS_STEP; radius <= maxRadius; radius += CLOUD_RADIUS_STEP) {
+        const steps = Math.min(240, Math.max(16, Math.round((2 * Math.PI * radius) / CLOUD_ARC_STEP)))
+        // Rotate each ring by an irrational-ish amount so candidates from
+        // successive rings never line up into visible spokes.
+        const phase = radius * 0.137
 
-      for (let step = 0; step < steps; step++) {
-        const angle = phase + (step * 2 * Math.PI) / steps
-        const candidate = boxAt(
-          Math.cos(angle) * radius * CLOUD_ASPECT,
-          Math.sin(angle) * radius
-        )
+        for (let step = 0; step < steps; step++) {
+          const angle = phase + (step * 2 * Math.PI) / steps
+          const candidate = boxAt(
+            seedX + Math.cos(angle) * radius * CLOUD_ASPECT,
+            seedY + Math.sin(angle) * radius
+          )
 
-        if (!this._collides(candidate, obstacles)) return candidate
+          if (!this._collides(candidate, obstacles)) return candidate
+        }
       }
+
+      return null
     }
 
-    return null
+    if (origin) {
+      const nearby = search(origin.x, origin.y, CLOUD_NEAR_RADIUS)
+      if (nearby) return nearby
+    }
+
+    return search(0, 0, CLOUD_MAX_RADIUS)
   },
 
   _collides(rect, obstacles) {

@@ -91,9 +91,19 @@ defmodule Notable.WordCloud.StyleTest do
     end
 
     test "a word's font size does not move when other words gain mentions" do
-      before = Style.font_size("materi", 1)
+      quiet = ["materi bagus", "materi jelas"]
+      busy = quiet ++ ["praktis keren", "praktis mantap", "praktis rapi", "praktis padat"]
 
-      assert Style.font_size("materi", 1) == before
+      materi = fn submissions ->
+        submissions |> WordCloud.build() |> Enum.find(&(&1.word == "materi"))
+      end
+
+      before = materi.(quiet)
+      later = materi.(busy)
+
+      assert later.count == before.count
+      assert later.level == before.level
+      assert later.font_size == before.font_size
     end
 
     test "two words at the same level get different sizes" do

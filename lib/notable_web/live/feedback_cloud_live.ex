@@ -176,6 +176,7 @@ defmodule NotableWeb.FeedbackCloudLive do
         >
           <li
             :for={word <- @words}
+            id={"cloud-word-#{word.word}"}
             data-word={word.word}
             data-level={word.level}
             data-rotated={to_string(word.rotated)}
