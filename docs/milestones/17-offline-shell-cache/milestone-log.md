@@ -40,7 +40,7 @@ writes the design for fixing that and builds the first of its four pieces.
 Strategy, as the spec records it: network-first for the two shell documents with a 3 s
 bound and cache fallback; cache-first for digested assets (`name-<md5>.ext`); nothing
 under `/admin`, `/live`, `/webhooks`, `/dev`, `/phoenix`, no non-GET, no cross-origin,
-no other document. Precache list = the `assets/` and `fonts/` entries of the digest
+no other document. Precache list = the `.js`, `.css` and `.woff2` entries of the digest
 manifest the endpoint loads (`cache_static_manifest_latest`). Cache name
 `notable-<stamp>`, stamp = sha256(worker source + precache list)[0..16]; `activate`
 deletes the other `notable-*` caches; `skipWaiting` + `clients.claim`; no forced reload.

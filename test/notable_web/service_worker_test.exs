@@ -20,6 +20,8 @@ defmodule NotableWeb.ServiceWorkerTest do
     "assets/js/sw_register.js" => "assets/js/sw_register-0d5e2a5c3f8a4b1c9e7d6f5a4b3c2d1e.js",
     "fonts/notable-display.woff2" =>
       "fonts/notable-display-98c1e90b3c2e11867a49a8a145d276f5.woff2",
+    "fonts/notable-display.LICENSE.txt" =>
+      "fonts/notable-display.LICENSE-1c4f8a2b3d5e6f7a8b9c0d1e2f3a4b5c.txt",
     "favicon.svg" => "favicon-e4926393f53ab4964e1c948af212f823.svg",
     "images/qr-questions.png" => "images/qr-questions-ba10bf84d0e4cf1d1d39a146f5bd2a3b.png",
     "og-image.png" => "og-image-ebf519bb647a9cc59d3119c90f9de691.png",
@@ -57,6 +59,7 @@ defmodule NotableWeb.ServiceWorkerTest do
       refute Enum.any?(precache, &String.starts_with?(&1, "/images/"))
       refute Enum.any?(precache, &String.ends_with?(&1, ".wav"))
       refute Enum.any?(precache, &String.ends_with?(&1, ".txt"))
+      refute Enum.any?(precache, &String.contains?(&1, "LICENSE"))
       refute Enum.any?(precache, &String.ends_with?(&1, ".webmanifest"))
       refute Enum.any?(precache, &String.contains?(&1, "og-image"))
     end

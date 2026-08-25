@@ -62,3 +62,8 @@ npm-debug.log
 
 # Cursor's native worktree tool nests worktrees inside the repo
 /.worktrees/
+
+# Ignore `mix phx.digest` output for the static roots outside assets/
+# (digested `<name>-<md5>.<ext>` copies and their .gz siblings).
+/priv/static/**/*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].*
+/priv/static/**/*.gz

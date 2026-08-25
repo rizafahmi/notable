@@ -10,7 +10,7 @@ defmodule NotableWeb.ServiceWorker do
   switch) and is read at compile time. What it caches is decided here, in
   Elixir, where it can be tested:
 
-    * `precache/1` - the digested scripts, stylesheets and fonts from
+    * `precache/1` - the digested scripts, stylesheets and web fonts from
       `mix phx.digest`'s manifest, so the list never rots by hand.
     * `config/1` - the shell documents, the paths that must never be cached,
       and the network-first timeout.
@@ -34,8 +34,10 @@ defmodule NotableWeb.ServiceWorker do
   # Prefix-matched on the request path; the worker steps aside for all of these.
   @never_cache ["/admin", "/live", "/webhooks", "/dev", "/phoenix"]
 
-  # Logical-path prefixes in the digest manifest that the shell needs offline.
-  @precache_prefixes ["assets/", "fonts/"]
+  # Extensions in the digest manifest that the shell needs offline: the bundled
+  # script and stylesheet plus the web font. Not the OFL notice beside the font,
+  # not images, not robots/sitemap/manifest.
+  @precache_extensions [".js", ".css", ".woff2"]
 
   # How long network-first waits for a document before serving the cached copy.
   @network_timeout_ms 3_000
@@ -80,9 +82,7 @@ defmodule NotableWeb.ServiceWorker do
   @spec precache(latest()) :: [String.t()]
   def precache(latest) when is_map(latest) do
     latest
-    |> Enum.filter(fn {logical, _digested} ->
-      Enum.any?(@precache_prefixes, &String.starts_with?(logical, &1))
-    end)
+    |> Enum.filter(fn {logical, _digested} -> Path.extname(logical) in @precache_extensions end)
     |> Enum.map(fn {_logical, digested} -> "/" <> digested end)
     |> Enum.sort()
   end
