@@ -177,9 +177,10 @@ when the container grows.
 
 ## Deliberately not done
 
-- The `font-display` face is still broken (`priv/static/fonts/notable-display.woff2` is
-  the Vietnamese subset of Fraunces and has no Latin letters), so these words render in
-  the fallback serif. That is the queued `notable-display-font-subset` task and was left
-  alone. The layout measures whatever font resolves at runtime, which is correct either way.
+- The `font-display` face was broken while this was built (`priv/static/fonts/notable-display.woff2`
+  was the Vietnamese subset of Fraunces, with no Latin letters), so the screenshots above show
+  the fallback serif. That was left to its own task, since landed as
+  [Milestone 17 display-font fix](../17-display-font-fix/milestone-log.md). The layout
+  measures whatever font resolves at runtime, so it needed no change when that landed.
 - The current-WIB-day scope, the two-distinct-submissions rule and the blocklist are
   untouched.

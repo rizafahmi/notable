@@ -102,8 +102,7 @@
 3. Dispatch **Actions → Deploy** again with the pinned `ubuntu-22.04` runner and watch it. The secrets and variables listed in [OPERATIONS.md](OPERATIONS.md#required-secrets-and-variables) already exist — the first dispatch reached the VM and failed only on the glibc mismatch.
 4. Verify production DNS cluster membership and that donor Presence totals propagate across nodes before making cross-node count claims.
 5. Run one final low-value live Mayar QRIS transaction against the deployed callback URL.
-6. Fix the `font-display` face — `priv/static/fonts/notable-display.woff2` is the Vietnamese subset of Fraunces and contains no Latin letters, so `/cloud` (and every other `font-display` surface) renders in the fallback serif. Queued as `notable-display-font-subset`; the packed layout measures whatever font resolves, so it needs no change when this lands.
-7. Extend `Notable.WordCloud.Lexicon`'s blocklist if a live audience surfaces variants it misses — matching is exact-token, so inflected or misspelled forms pass through.
+6. Extend `Notable.WordCloud.Lexicon`'s blocklist if a live audience surfaces variants it misses — matching is exact-token, so inflected or misspelled forms pass through.
 7. Notable rename remaining slice: GitHub repo rename ([#69](https://github.com/rizafahmi/donatex/issues/69)); close parent [#2](https://github.com/rizafahmi/donatex/issues/2) after that lands. Keep `DONATEX_*` env aliases until the captain says drop them.
 8. Merge open hardening PRs still awaiting review (#26 amount-fallback) as they land.
 10. Verify production DNS cluster membership and that donor Presence totals propagate across nodes before making cross-node count claims.
