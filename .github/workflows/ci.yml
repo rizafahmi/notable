@@ -35,8 +35,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install OpenCV for QR decode tests
-        run: python3 -m pip install --disable-pip-version-check opencv-python-headless numpy
+      # fontTools reads the shipped display .woff2 so the font-coverage tests can
+      # prove the wordmark's glyphs are actually in the file. Brotli is what
+      # decompresses a WOFF2 table directory.
+      - name: Install OpenCV for QR decode tests and fontTools for font coverage tests
+        run: python3 -m pip install --disable-pip-version-check opencv-python-headless numpy fonttools brotli
 
       - name: Cache deps and build artifacts
         uses: actions/cache@v6
