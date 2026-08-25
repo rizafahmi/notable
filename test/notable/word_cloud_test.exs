@@ -164,4 +164,42 @@ defmodule Notable.WordCloudTest do
       assert level_of.(before)["materi"] == level_of.(later)["materi"]
     end
   end
+
+  describe "the two-word cloud" do
+    test "a single repeated pair renders in two tones and is not entirely vertical" do
+      assert [a, b] = WordCloud.build(["materi bagus", "materi bagus"])
+
+      assert a.tone != b.tone
+      assert a.rotated != b.rotated
+    end
+
+    test "holds for any pair, not just a lucky one" do
+      pairs = for i <- 1..60, do: {"kata#{i}", "lain#{i}"}
+
+      for {x, y} <- pairs do
+        assert [a, b] = WordCloud.build(["#{x} #{y}", "#{x} #{y}"])
+        assert a.tone != b.tone, "#{x} #{y} share tone #{a.tone}"
+        assert a.rotated != b.rotated, "#{x} #{y} share an orientation"
+      end
+    end
+
+    test "an earlier word qualifying later does not restyle the words already shown" do
+      before = ["keren sekali", "materi bagus", "materi bagus"]
+      later = before ++ ["keren banget"]
+
+      style_of = fn subs ->
+        subs
+        |> WordCloud.build()
+        |> Map.new(&{&1.word, {&1.tone, &1.font_size, &1.rotated}})
+      end
+
+      shown = style_of.(before)
+      updated = style_of.(later)
+
+      assert Map.keys(shown) == ["bagus", "materi"]
+      assert Map.has_key?(updated, "keren")
+      assert updated["materi"] == shown["materi"]
+      assert updated["bagus"] == shown["bagus"]
+    end
+  end
 end

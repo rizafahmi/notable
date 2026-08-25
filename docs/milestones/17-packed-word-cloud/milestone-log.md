@@ -33,12 +33,15 @@ There is no JavaScript test runner in this project and none was added, so the sp
 | size variation within a level | `Notable.WordCloud.Style` | `test/notable/word_cloud/style_test.exs` |
 | colour | `Notable.WordCloud.Style` | same |
 | rotation | `Notable.WordCloud.Style` | same |
+| contrast between neighbours (tone family, orientation) | `Notable.WordCloud.Style.decorate_all/1` | same |
 | **placement only** | `Hooks.WordCloud` in `assets/js/app.js` | verified in a real browser (below) |
 
 `Notable.WordCloud.Style` derives everything from a local **FNV-1a** hash of the word,
 salted per aspect (`"tone:"`, `"size:"`, `"spin:"`) so tone, size and rotation are
 independent — a single hash would have made every rotated word share a colour. FNV-1a
 rather than `:erlang.phash2/1` so the mapping is fixed by this module, not by the runtime.
+The hash is the word's *own* choice; the neighbour rules below may overrule it (see
+"Second round").
 
 The size bands are provably disjoint: `base_font_size(n) * high < base_font_size(n + 1) * low`
 is asserted for every level, so a more-mentioned word is still always the visibly bigger
@@ -87,23 +90,84 @@ re-placed. Fixed by storing `measuredWidth`/`measuredHeight` alongside the colli
 and comparing against those. This is only observable in a browser under a real live
 update — it is why the visual verification below is a gate and not a formality.
 
+## Second round: the two-word cloud, and the review round
+
+The first pass shipped with an honest weakness, visible in its own screenshot: a
+cloud of **two** words rendered both vertical and both cyan — exactly the complaint that
+opened this milestone. A per-word hash cannot promise anything about a *pair*, and with
+two words the pair is the whole picture. The captain asked for contrast in tone *and*
+orientation even when the room is tiny, for the tones to become real design tokens, and
+for a grown word to stay in its neighbourhood.
+
+### Neighbour rules that are still stable
+
+`Style.decorate_all/1` now decorates the day's words **in first-appearance order** and
+lets each word see the two that appeared before it:
+
+| Rule | Why |
+|---|---|
+| Never the colour *family* of either of the two words before it | Two tokens is not two colours if the room cannot tell them apart: `accent` (hue 205) and `success` (hue 185) are one `:teal` family. Five families, so with two taken it always resolves. Looking back two also stops "a b a" stripes |
+| Never vertical after a vertical word | Two verticals side by side read as a fence |
+| Always vertical after two horizontal words (the day's start counts as horizontal) | Three horizontals in a row read as a list — and this is what gives a two-word cloud one of each |
+| The first word of the day is horizontal | It anchors the cloud |
+
+The realised vertical share is bounded by those rules alone — strictly between a third
+and a half — and the hash only decides the free case.
+
+**Why this does not restyle words mid-talk.** The order is over *every* word of the day,
+qualifying or not (`WordCloud.build/2` now styles before applying the two-submission
+threshold), and the day's feedback is append-only: it resets at WIB midnight, never in
+the middle of a talk. A word's two predecessors are therefore fixed the moment it first
+appears, so its tone and orientation are fixed too — even when a word that appeared
+*earlier* only reaches the threshold *later* and slots in ahead of it. Tested directly
+(`"an earlier word qualifying later does not restyle the words already shown"`) and as a
+prefix property (`decorate_all(prefix) == take(decorate_all(full), n)`).
+
+One edge remains: two submissions inserted in the **same second** are ordered by `id`
+on reload (`list_feedback_for_date` sorts `desc: inserted_at, desc: id`) but by arrival
+when live. A reconnect after that could swap two words' order, and with it their styles.
+The hook re-mounts and re-packs on reconnect anyway; it is noted, not fixed.
+
+### Tones as design tokens
+
+The two colours the cloud needed beyond the palette were first hard-coded, then (in the
+review round) folded onto `--color-danger` and a `color-mix`. The captain chose instead
+to add them to the design system: `--color-accent-amber` (`oklch(83% 0.15 85)`, "Console
+Amber") and `--color-accent-rose` (`oklch(74% 0.17 350)`, "Chat Rose") now live in
+`@theme` and in [DESIGN.md → Display accents](../../DESIGN.md), marked display-only so
+the Console Rarity Rule still holds. `.cloud-tone-5/6` reference them.
+
+### Review findings (all fixed in the review round, re-verified here)
+
+1. *Resized word teleports* — `_spiral` now takes an `origin`; a word whose box grew is
+   searched first within `CLOUD_NEAR_RADIUS` (260px) of where it sat. Browser-verified
+   below: `mantap` grew from count 2 to 4 (level 1 → 2) and its centre moved **38px**.
+2. *Unkeyed `<li>` animates the wrong word* — `id={"cloud-word-#{word}"}` so morphdom
+   keys by word instead of position.
+3. *Failed re-pack leaves state stale* — a re-pack that still cannot place a word now
+   renders the partial state.
+4. *Tautological font-size test* — replaced with two corpora differing only in another
+   word's count.
+5. *Off-theme tone colours* — superseded by the tokens above.
+
 ## Verification
 
-`mix ci` green — format, `format --check-formatted`, `compile --warnings-as-errors`, `credo --strict`, dialyzer, `ex_dna --max-clones 0`, `reach.check`. Suite: **494 tests, 0 failures** (466 before; +17 in `test/notable/word_cloud/style_test.exs`, +11 in `test/notable_web/live/feedback_cloud_live_test.exs`).
+`mix ci` green — format, `format --check-formatted`, `compile --warnings-as-errors`, `credo --strict`, dialyzer, `ex_dna --max-clones 0`, `reach.check`. Suite: **509 tests, 0 failures** (466 before this milestone; `test/notable/word_cloud/style_test.exs` covers tone, size variation, rotation and the neighbour rules; `test/notable/word_cloud_test.exs` covers the two-word cloud through `build/2` for sixty arbitrary pairs; `test/notable_web/live/feedback_cloud_live_test.exs` covers the rendered page).
 
 Browser verification with `chrome-devtools-axi` (Chrome Canary) against the dev server,
-seeded with 14 realistic Indonesian feedback submissions producing 16 words across 4
-size levels, all 6 tones, and 6 rotated:
+seeded with 14 realistic Indonesian feedback submissions spaced 20s apart, producing 18
+words across 3 size levels, all 6 tones, and 8 vertical; then two more submitted live
+through the real donor form:
 
 | Screenshot | What it shows |
 |---|---|
-| [`cloud-packed-1920.png`](screenshots/cloud-packed-1920.png) | `/cloud` at 1920×1080. Four visibly different sizes, all six colours, six vertical words, short words nested into tall words' gaps, roughly elliptical mass with empty corners |
-| [`cloud-packed-1280x720.png`](screenshots/cloud-packed-1280x720.png) | The same arrangement re-fitted to a smaller viewport — no clipping, no overflow |
-| [`cloud-packed-after-live-update.png`](screenshots/cloud-packed-after-live-update.png) | After two feedback submissions arrive live. `sesi` and `interaktif` are added; **zero** already-placed words moved in layout space (diffed rule-by-rule from the injected stylesheet) |
-| [`cloud-packed-single-pair.png`](screenshots/cloud-packed-single-pair.png) | The minimum cloud: one word pair. Both words hash to rotated and to the same tone here — that is the honest output of a per-word hash with a 6-colour palette, not a bug |
-| [`cloud-packed-single-pair-horizontal.png`](screenshots/cloud-packed-single-pair-horizontal.png) | A second pair, both at count 2: two colours, two sizes, nested — the equal-count case at minimum scale |
+| [`cloud-packed-1920.png`](screenshots/cloud-packed-1920.png) | `/cloud` at 1920×1080. Three visibly different sizes, all six colours, eight vertical words nested into the horizontals' gaps, a roughly elliptical mass with empty corners. No two neighbouring-in-time words share a colour family |
+| [`cloud-packed-1280x720.png`](screenshots/cloud-packed-1280x720.png) | The same arrangement re-fitted to a smaller viewport — no clipping, no overflow (`scrollWidth == clientWidth`, `scrollHeight == clientHeight`) |
+| [`cloud-packed-after-live-update.png`](screenshots/cloud-packed-after-live-update.png) | After `mantap, sesi interaktif` is submitted twice through `/`. `sesi` and `interaktif` are added into leftover gaps; `mantap` (count 2 → 4, level 1 → 2) is re-placed **38px** from its old centre; the other **17 rules are byte-identical** in the injected stylesheet. The fit scale only shrank (2.49 → 2.28) |
+| [`cloud-packed-single-pair.png`](screenshots/cloud-packed-single-pair.png) | The minimum cloud, `materi bagus` twice: `materi` horizontal cyan, `bagus` vertical amber. Compare the first pass, where this pair came out both vertical and both cyan |
+| [`cloud-packed-single-pair-2.png`](screenshots/cloud-packed-single-pair-2.png) | A second pair, `kodenya rapi`: `kodenya` horizontal slate, `rapi` vertical rose. Any pair gets one of each orientation and two colour families — the test covers sixty |
 | [`cloud-overlay-1920.png`](screenshots/cloud-overlay-1920.png) | `/cloud-overlay`. `html`, `body` and the section all compute `rgba(0, 0, 0, 0)`; no header; `scrollHeight == clientHeight` and `scrollWidth == clientWidth` |
-| [`cloud-no-js-fallback.png`](screenshots/cloud-no-js-fallback.png) | The pre-hook / no-JavaScript state (packed class and injected stylesheet removed): a readable centred wrapping list, not a heap of words at one point |
+| [`cloud-no-js-fallback.png`](screenshots/cloud-no-js-fallback.png) | The pre-hook / no-JavaScript state (hook element detached, packed class and injected stylesheet removed): a readable centred wrapping list, not a heap of words at one point |
 
 Viewport sweep at 1920×1080, 1280×720 and 820×640: no vertical or horizontal overflow at
 any size, content inside the container with margin at all three, and the fit grows back

@@ -39,8 +39,8 @@ defmodule Notable.WordCloud.StyleTest do
       assert reached == Enum.sort(Style.tones())
     end
 
-    test "tone_class/1 renders the tone as a stable css class" do
-      assert Style.tone_class("materi") == "cloud-tone-#{Style.tone("materi")}"
+    test "tone_class/1 renders a tone as the css class that paints it" do
+      for tone <- Style.tones(), do: assert(Style.tone_class(tone) == "cloud-tone-#{tone}")
     end
   end
 
@@ -139,17 +139,131 @@ defmodule Notable.WordCloud.StyleTest do
     end
   end
 
-  describe "decorate/1" do
+  describe "decorate_all/1 — neighbours contrast, history is append-only" do
+    # `decorate_all/1` takes every word of the day in first-appearance order,
+    # qualifying or not. That order is append-only for the life of the talk,
+    # which is what lets a word's appearance depend on its predecessors and
+    # still never change.
+    defp entries(words), do: Enum.map(words, &%{word: &1, count: 2, level: 1})
+
     test "adds tone, font size and rotation to a built word without touching the rest" do
-      decorated = Style.decorate(%{word: "materi", count: 2, level: 1})
+      [decorated] = Style.decorate_all([%{word: "materi", count: 2, level: 1}])
 
       assert decorated.word == "materi"
       assert decorated.count == 2
       assert decorated.level == 1
       assert decorated.tone == Style.tone("materi")
-      assert decorated.tone_class == Style.tone_class("materi")
+      assert decorated.tone_class == Style.tone_class(decorated.tone)
       assert decorated.font_size == Style.font_size("materi", 1)
-      assert decorated.rotated == Style.rotated?("materi")
+      assert decorated.rotated == false
+    end
+
+    test "the smallest cloud — one repeated pair — never shares a tone" do
+      [a, b] = Style.decorate_all(entries(["materi", "bagus"]))
+
+      assert a.tone != b.tone
+    end
+
+    test "the smallest cloud shows both orientations: anchor horizontal, second vertical" do
+      for {x, y} <- [{"materi", "bagus"}, {"seru", "banget"}, {"kata8", "lain8"}] do
+        assert [%{rotated: false}, %{rotated: true}] = Style.decorate_all(entries([x, y]))
+      end
+    end
+
+    test "no three neighbours are all horizontal" do
+      decorated = Style.decorate_all(entries(corpus(500)))
+
+      decorated
+      |> Enum.chunk_every(3, 1, :discard)
+      |> Enum.each(fn [a, b, c] ->
+        assert a.rotated or b.rotated or c.rotated, "#{a.word}, #{b.word}, #{c.word}"
+      end)
+    end
+
+    test "any pair of neighbours differs in tone, whatever the words" do
+      decorated = Style.decorate_all(entries(corpus(500)))
+
+      decorated
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.each(fn [a, b] -> assert a.tone != b.tone, "#{a.word} and #{b.word}" end)
+    end
+
+    test "neighbours differ in colour family, not merely in token: cyan and success are one family" do
+      # accent (hue 205) and success (hue 185) are near-identical on a
+      # projector. Two tones is not two colours if the room cannot tell them
+      # apart, so the contrast rule works on families.
+      assert Style.tone_family(2) == Style.tone_family(4)
+      assert Style.tones() |> Enum.map(&Style.tone_family/1) |> Enum.uniq() |> length() == 5
+
+      decorated = Style.decorate_all(entries(corpus(500)))
+
+      decorated
+      |> Enum.chunk_every(3, 1, :discard)
+      |> Enum.each(fn [a, b, c] ->
+        families = Enum.map([a, b, c], &Style.tone_family(&1.tone))
+        assert families == Enum.uniq(families), "#{a.word}, #{b.word}, #{c.word}"
+      end)
+    end
+
+    test "no two neighbours are both vertical" do
+      decorated = Style.decorate_all(entries(corpus(500)))
+
+      decorated
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.each(fn [a, b] -> refute a.rotated and b.rotated, "#{a.word} and #{b.word}" end)
+    end
+
+    test "the first word of the day anchors the cloud horizontally" do
+      for word <- corpus(50) do
+        assert [%{rotated: false}] = Style.decorate_all(entries([word]))
+      end
+    end
+
+    test "a word keeps its own hashed tone unless one of the two before it wears its family" do
+      decorated = Style.decorate_all(entries(corpus(500)))
+
+      decorated
+      |> Enum.chunk_every(3, 1, :discard)
+      |> Enum.each(fn [before_previous, previous, current] ->
+        own = Style.tone(current.word)
+        worn = Enum.map([before_previous.tone, previous.tone], &Style.tone_family/1)
+
+        if Style.tone_family(own) in worn do
+          refute Style.tone_family(current.tone) in worn
+        else
+          assert current.tone == own
+        end
+      end)
+    end
+
+    test "a word is also never the colour of the word before its neighbour" do
+      # Without this, a small room reads as "a b a b" stripes.
+      decorated = Style.decorate_all(entries(corpus(500)))
+
+      decorated
+      |> Enum.chunk_every(3, 1, :discard)
+      |> Enum.each(fn [a, _b, c] -> assert a.tone != c.tone, "#{a.word} and #{c.word}" end)
+    end
+
+    test "a word's appearance depends only on the words before it" do
+      full = Style.decorate_all(entries(corpus(120)))
+
+      for n <- [1, 2, 3, 7, 40, 119] do
+        assert Style.decorate_all(entries(corpus(n))) == Enum.take(full, n)
+      end
+    end
+
+    test "still a minority vertical, still the whole palette in use" do
+      decorated = Style.decorate_all(entries(corpus(500)))
+      share = Enum.count(decorated, & &1.rotated) / 500
+
+      # Bounded by the neighbour rules alone: never two vertical in a row
+      # (< 1/2), never three horizontal in a row (> 1/3).
+      assert share > 0.33
+      assert share < 0.5
+
+      assert decorated |> Enum.map(& &1.tone) |> Enum.uniq() |> Enum.sort() ==
+               Enum.sort(Style.tones())
     end
   end
 

@@ -42,6 +42,13 @@
   --color-success: oklch(74% 0.12 185);
   --color-danger: oklch(62% 0.18 25);
 
+  /* Display accents: the two extra tones the /cloud word cloud needs to paint
+     six distinguishable colours on a projector and over OBS. Display-only —
+     never for controls or states, which keeps the Console Rarity Rule intact.
+     See docs/DESIGN.md → Colors → Display accents. */
+  --color-accent-amber: oklch(83% 0.15 85);
+  --color-accent-rose: oklch(74% 0.17 350);
+
   --animate-neon-pulse: neon-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-neon-purple-pulse: neon-purple-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-border-glow: border-glow 4s ease-in-out infinite;
@@ -485,11 +492,8 @@
 .cloud-tone-2 { color: var(--color-accent); }
 .cloud-tone-3 { color: var(--color-accent-2); }
 .cloud-tone-4 { color: var(--color-success); }
-.cloud-tone-5 { color: var(--color-danger); }
-/* Derived from two palette tokens rather than being a seventh brand colour:
-   mixing danger with accent-2 in OKLCH lands between their hues, which is far
-   enough from both to read as its own tone on the projector and over OBS. */
-.cloud-tone-6 { color: color-mix(in oklch, var(--color-danger) 50%, var(--color-accent-2) 50%); }
+.cloud-tone-5 { color: var(--color-accent-amber); }
+.cloud-tone-6 { color: var(--color-accent-rose); }
 
 .cloud-words {
   display: flex;

@@ -69,15 +69,22 @@ defmodule Notable.WordCloud do
   def build(submissions, opts \\ []) when is_list(submissions) do
     max_words = Keyword.get(opts, :max_words, @default_max_words)
 
+    # Every word of the day is styled, in first-appearance order, *before* the
+    # display threshold is applied: a word's appearance is decided against the
+    # words that appeared before it, and that history is append-only, so a word
+    # qualifying late cannot restyle the words already on screen.
     submissions
     |> first_appearances()
     |> tally()
-    |> Enum.filter(fn {_word, {count, _pos}} -> count >= @min_submissions end)
-    |> take_top(max_words)
     |> Enum.sort_by(fn {_word, {_count, pos}} -> pos end)
-    |> Enum.map(fn {word, {count, _pos}} ->
-      Style.decorate(%{word: word, count: count, level: level_for(count)})
+    |> Enum.map(fn {word, {count, pos}} ->
+      %{word: word, count: count, level: level_for(count), position: pos}
     end)
+    |> Style.decorate_all()
+    |> Enum.filter(&(&1.count >= @min_submissions))
+    |> take_top(max_words)
+    |> Enum.sort_by(& &1.position)
+    |> Enum.map(&Map.delete(&1, :position))
   end
 
   @doc """
@@ -121,7 +128,7 @@ defmodule Notable.WordCloud do
   # fully determined by the input, never by map iteration order.
   defp take_top(entries, max_words) do
     entries
-    |> Enum.sort_by(fn {word, {count, pos}} -> {-count, pos, word} end)
+    |> Enum.sort_by(&{-&1.count, &1.position, &1.word})
     |> Enum.take(max_words)
   end
 

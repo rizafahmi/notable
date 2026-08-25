@@ -193,6 +193,17 @@ defmodule NotableWeb.FeedbackCloudLiveTest do
                overlay |> attribute_values(~r/font-size:\s*([\d.]+)rem/)
     end
 
+    test "the smallest cloud — one repeated pair — still shows contrast", %{conn: conn} do
+      feedback!("materi bagus")
+      feedback!("materi bagus")
+
+      {:ok, view, _html} = live(conn, ~p"/cloud")
+
+      assert cloud_words(view) == ["materi", "bagus"]
+      assert view |> attribute_values(~r/(cloud-tone-\d+)/) |> Enum.uniq() |> length() == 2
+      assert attribute_values(view, ~r/data-rotated="(\w+)"/) == ["false", "true"]
+    end
+
     test "colour does not move when a word's count grows", %{conn: conn} do
       seed_equal_count_cloud!()
 
