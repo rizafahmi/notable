@@ -1,4 +1,4 @@
-# Milestone 17 — Offline submission: spec + service worker shell cache
+# Milestone 18 — Offline submission: spec + service worker shell cache
 
 The captain watched the app fail on venue wifi at a talk on 2026-08-23. This milestone
 writes the design for fixing that and builds the first of its four pieces.
