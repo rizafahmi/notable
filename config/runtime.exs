@@ -23,6 +23,11 @@ end
 config :notable, NotableWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Kill switch for the app-shell service worker: `off` makes /sw.js serve a
+# worker that unregisters itself and purges its caches. See
+# docs/OPERATIONS.md#service-worker.
+config :notable, :service_worker, enabled: System.get_env("NOTABLE_SERVICE_WORKER") != "off"
+
 if config_env() == :prod do
   fetch_env! = fn var ->
     System.get_env(var) ||
