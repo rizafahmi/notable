@@ -14,7 +14,10 @@
 }
 
 @theme {
-  --font-display: "Notable Display";
+  /* Fraunces, self-hosted. The fallbacks are load-bearing: when the webfont
+     is unavailable - conference wifi, a blocked path, a bad subset - headings
+     should still land on a serif rather than the browser default. */
+  --font-display: "Notable Display", Fraunces, Georgia, "Times New Roman", serif;
   --font-sans:
     ui-sans-serif,
     system-ui,
