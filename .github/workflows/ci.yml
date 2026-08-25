@@ -31,7 +31,7 @@ jobs:
       # the only check that the animated /qr page still reads on a real phone,
       # so they must run in CI rather than being skipped when cv2 is missing.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
