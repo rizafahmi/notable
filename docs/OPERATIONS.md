@@ -78,6 +78,10 @@ In production, set them in the systemd `EnvironmentFile` on the VM (see [Deploym
 - `ADMIN_USERNAME`
 - `ADMIN_PASSWORD`
 
+### Service Worker Kill Switch Variable
+
+- `NOTABLE_SERVICE_WORKER` (optional) - set to `off` to serve the kill switch instead of the app-shell service worker. Unset or any other value: the worker is on. See [Service Worker](#service-worker).
+
 ## Example Production Env File
 
 If you deploy with `systemd`, a file such as `/etc/notable/notable.env` can hold the release environment:
@@ -99,6 +103,9 @@ MAYAR_WEBHOOK_TOKEN=replace_me_with_a_long_random_token
 
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace_me_with_a_strong_password
+
+# Uncomment only to remove the app-shell service worker from every browser.
+# NOTABLE_SERVICE_WORKER=off
 ```
 
 Keep this file readable only by root and the release user.
@@ -499,6 +506,48 @@ On GCP, use a persistent disk (the default boot disk is already persistent) and 
 Erlang and Elixir do **not** need to be installed on the VM.
 `mix release` bundles ERTS, and the release is built on the CI runner.
 That bundled ERTS is what makes the build runner's glibc matter - see [Build Runner And The Target's glibc](#build-runner-and-the-targets-glibc).
+
+## Service Worker
+
+The audience pages `/` and `/questions` are cached by a service worker so they load on wifi that cannot load anything else.
+Design and scope: [docs/superpowers/specs/2026-08-25-offline-submission-design.md](superpowers/specs/2026-08-25-offline-submission-design.md).
+What is cached is decided in `NotableWeb.ServiceWorker` and pinned by `test/notable_web/service_worker_test.exs`.
+
+Observable behaviour:
+
+- `/sw.js` is generated per request from the digest manifest; it is sent with `Cache-Control: no-cache`.
+- The cache is named `notable-<stamp>`. The stamp changes when a build ships different digested assets or a different worker; the previous cache is deleted when the new worker activates.
+- Shell documents are network-first with a 3 s bound; digested assets are cache-first; `/admin`, `/live`, `/webhooks` and `/dev` are never touched.
+- Nothing force-reloads an open page. A new build reaches an open tab on its next navigation, or when LiveView reconnects and sees changed `phx-track-static` assets.
+
+### Kill Switch
+
+A service worker cannot be removed from the server side by deleting a file: browsers keep the last worker they installed and keep serving its cache.
+The way out is to serve a *different* worker that removes itself.
+
+To remove the worker from every browser after a bad deploy:
+
+1. Add `NOTABLE_SERVICE_WORKER=off` to the release env file (`DEPLOY_ENV_FILE`, e.g. `/etc/notable/notable.env`).
+2. Restart the unit: `sudo systemctl restart notable` (the unit named by `DEPLOY_SYSTEMD_UNIT`).
+3. Confirm: `curl -s https://feedback.rizafahmi.com/sw.js | head -3` prints the `kill switch` header comment instead of `app shell cache`.
+
+From then on every browser that opens any page fetches `/sw.js`, sees a byte-different script, installs it, and that worker deletes every Notable cache and unregisters itself.
+Pages it still controls talk straight to the network; the next navigation is uncontrolled.
+Remove the variable and restart again to turn the worker back on; browsers will install the real worker on their next visit.
+
+To remove it from one browser only, open the page's devtools console and run:
+
+```js
+await notableServiceWorker.uninstall()
+// => {unregistered: 1, cachesDeleted: 1}
+```
+
+or use *Application -> Service Workers -> Unregister* and *Application -> Storage -> Clear site data*.
+
+### Checking A Deploy Picked Up The New Build
+
+After a deploy that changed CSS or JS, load `/` once, then in devtools *Application -> Cache Storage* there must be exactly one `notable-*` cache and it must hold the digested asset names the new build serves (compare with `curl -s https://feedback.rizafahmi.com/ | grep -o 'app-[0-9a-f]*\.js'`).
+Two caches, or the old digest, means the worker did not update; check that `/sw.js` is served with `Cache-Control: no-cache` and that the stamp in its `CONFIG` differs from the one in the stale cache name.
 
 ## SQLite Notes
 

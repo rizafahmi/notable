@@ -21,6 +21,11 @@ defmodule NotableWeb.Router do
     plug :put_secure_browser_headers, NotableWeb.SecurityHeaders.headers()
   end
 
+  pipeline :service_worker do
+    plug :accepts, ["js"]
+    plug :put_secure_browser_headers, NotableWeb.SecurityHeaders.headers()
+  end
+
   pipeline :mayar_webhook do
     plug NotableWeb.Plugs.MayarWebhookAuth
   end
@@ -47,6 +52,14 @@ defmodule NotableWeb.Router do
       live "/admin", AdminLive
       live "/admin/questions", AdminQuestionLive
     end
+  end
+
+  # Served from the root so the worker's scope covers the whole site. Not in
+  # the :browser pipeline: a script fetch must not mint a session or a CSRF token.
+  scope "/", NotableWeb do
+    pipe_through :service_worker
+
+    get "/sw.js", ServiceWorkerController, :show
   end
 
   scope "/", NotableWeb do
