@@ -78,7 +78,7 @@ In production, set them in the systemd `EnvironmentFile` on the VM (see [Deploym
 - `ADMIN_USERNAME`
 - `ADMIN_PASSWORD`
 
-### Service Worker
+### Service Worker Kill Switch Variable
 
 - `NOTABLE_SERVICE_WORKER` (optional) - set to `off` to serve the kill switch instead of the app-shell service worker. Unset or any other value: the worker is on. See [Service Worker](#service-worker).
 
