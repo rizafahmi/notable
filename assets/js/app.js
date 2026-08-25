@@ -560,6 +560,314 @@ Hooks.FlashAutoHide = {
   }
 }
 
+// ===== Feedback Word Cloud Layout Hook =====
+//
+// Packs the rendered feedback words into a rough ellipse: measure each word as
+// the browser actually laid it out, then spiral outwards from the centre until
+// a gap is found that the word fits into.
+//
+// This hook decides geometry and nothing else. Colour, size and rotation are
+// picked by `Notable.WordCloud.Style` and arrive on the element as a
+// `cloud-tone-N` class, an inline `font-size` and `data-rotated`. The project
+// has no JavaScript test runner, so every decision that can be unit-tested
+// lives in Elixir.
+//
+// Two mechanics here are load-bearing rather than stylistic:
+//
+//   1. Positions are written into a `<style>` element in `<head>`, not into
+//      inline styles. LiveView's DOM patch removes attributes the server
+//      template does not own, so an inline `transform` would be wiped the
+//      moment another word arrived.
+//   2. `.cloud-packed` is flipped on `<html>`, outside the LiveView container,
+//      for the same reason. Its absence is also the no-JavaScript fallback:
+//      `.cloud-words` stays a centred wrapping list until the hook mounts.
+//
+// Placement is incremental. A word keeps the position it was first given and
+// new words are packed into the space that is left, because words rearranging
+// themselves mid-talk is the failure mode this page cannot have. A full
+// re-pack happens only when a word genuinely cannot be placed, or when the web
+// font finally loads and every measurement taken so far is stale.
+const CLOUD_PACKED_CLASS = "cloud-packed"
+// Layout-space pixels kept between two words. Small, so short words nest into
+// tall words' gaps rather than sitting on a shared gutter.
+const CLOUD_PADDING = 4
+const CLOUD_RADIUS_STEP = 6
+const CLOUD_ARC_STEP = 9
+const CLOUD_MAX_RADIUS = 4000
+// Horizontal stretch of the spiral, which is what makes the mass elliptical
+// rather than circular.
+const CLOUD_ASPECT = 1.75
+const CLOUD_FIT_MARGIN = 0.9
+const CLOUD_MAX_SCALE = 6
+
+const cloudRound = (value, places = 2) => {
+  const factor = 10 ** places
+  return Math.round(value * factor) / factor
+}
+
+// Words are `[\p{L}\p{N}]+` tokens, so this can never actually fire — it is
+// here so a future change to tokenisation cannot turn a word into a selector.
+const cloudEscape = (value) => value.replace(/["\\]/g, "\\$&")
+
+Hooks.WordCloud = {
+  mounted() {
+    this._placed = new Map()
+    this._scale = null
+    this._offset = {x: 0, y: 0}
+    this._firstRender = true
+
+    this._sheet = document.createElement("style")
+    this._sheet.setAttribute("data-word-cloud", this.el.id)
+    document.head.appendChild(this._sheet)
+    document.documentElement.classList.add(CLOUD_PACKED_CLASS)
+
+    // A resize only rescales; it never re-packs, so nothing moves relative to
+    // anything else when the projector resolution or OBS canvas changes.
+    this._onResize = () => this._fit({allowGrow: true})
+    if (typeof ResizeObserver !== "undefined") {
+      this._observer = new ResizeObserver(this._onResize)
+      this._observer.observe(this.el)
+    } else {
+      window.addEventListener("resize", this._onResize)
+    }
+
+    this._layout({repack: true})
+
+    // `font-display: swap` means the first measurement is of the fallback
+    // face. Re-pack once the real one lands rather than keeping a layout
+    // measured against metrics that no longer apply.
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => {
+        if (this.el.isConnected) this._layout({repack: true})
+      })
+    }
+  },
+
+  updated() {
+    this._layout({repack: false})
+  },
+
+  destroyed() {
+    document.documentElement.classList.remove(CLOUD_PACKED_CLASS)
+    if (this._sheet) {
+      this._sheet.remove()
+      this._sheet = null
+    }
+    if (this._observer) {
+      this._observer.disconnect()
+      this._observer = null
+    } else if (this._onResize) {
+      window.removeEventListener("resize", this._onResize)
+    }
+  },
+
+  _layout({repack}) {
+    const items = Array.from(this.el.querySelectorAll("[data-word]"))
+
+    if (items.length === 0) {
+      this._placed.clear()
+      this._render()
+      return
+    }
+
+    const present = new Set(items.map(el => el.dataset.word))
+    for (const word of Array.from(this._placed.keys())) {
+      if (!present.has(word)) this._placed.delete(word)
+    }
+
+    // `offsetWidth`/`offsetHeight` are layout sizes, so they are unaffected by
+    // the fit transform sitting on the container.
+    const measured = items.map(el => ({
+      word: el.dataset.word,
+      rotated: el.dataset.rotated === "true",
+      width: el.offsetWidth,
+      height: el.offsetHeight
+    }))
+
+    let pending
+    if (repack) {
+      this._placed.clear()
+      pending = measured
+    } else {
+      pending = measured.filter(item => {
+        const placed = this._placed.get(item.word)
+        if (!placed) return true
+        // The word's count crossed a size threshold, so the box it was placed
+        // in no longer describes it. Re-place that one word, not the cloud.
+        // Compared against the *measured* size, not the collision box: a
+        // rotated word's collision box has its dimensions swapped, so
+        // comparing that would re-place every vertical word on every update.
+        if (placed.measuredWidth !== item.width || placed.measuredHeight !== item.height) {
+          this._placed.delete(item.word)
+          return true
+        }
+        return false
+      })
+    }
+
+    if (pending.length === 0) {
+      this._fit({allowGrow: false})
+      return
+    }
+
+    // Biggest first: a greedy spiral only packs tightly when the large words
+    // claim the centre before the small ones fill it in.
+    pending.sort((a, b) => b.width * b.height - a.width * a.height)
+
+    const obstacles = Array.from(this._placed.values())
+
+    for (const item of pending) {
+      const placement = this._spiral(item, obstacles)
+
+      if (!placement) {
+        // Genuinely out of room next to what is already there. This is the one
+        // case that earns moving words that are already on screen.
+        if (!repack) this._layout({repack: true})
+        return
+      }
+
+      obstacles.push(placement)
+      this._placed.set(item.word, placement)
+    }
+
+    this._fit({allowGrow: repack})
+  },
+
+  // Archimedean-ish search: ring by ring outwards from the origin, testing
+  // evenly spaced candidates on each ring. n is at most `max_words`, so the
+  // brute-force overlap test against every placed word stays cheap.
+  _spiral(item, obstacles) {
+    const width = item.rotated ? item.height : item.width
+    const height = item.rotated ? item.width : item.height
+
+    // A rotated word turns about its own centre, so the element's untransformed
+    // top-left is derived from the centre rather than from the collision box.
+    const boxAt = (centreX, centreY) => ({
+      word: item.word,
+      rotated: item.rotated,
+      measuredWidth: item.width,
+      measuredHeight: item.height,
+      width,
+      height,
+      x: centreX - width / 2,
+      y: centreY - height / 2,
+      tx: centreX - item.width / 2,
+      ty: centreY - item.height / 2
+    })
+
+    const centre = boxAt(0, 0)
+    if (!this._collides(centre, obstacles)) return centre
+
+    for (let radius = CLOUD_RADIUS_STEP; radius <= CLOUD_MAX_RADIUS; radius += CLOUD_RADIUS_STEP) {
+      const steps = Math.min(240, Math.max(16, Math.round((2 * Math.PI * radius) / CLOUD_ARC_STEP)))
+      // Rotate each ring by an irrational-ish amount so candidates from
+      // successive rings never line up into visible spokes.
+      const phase = radius * 0.137
+
+      for (let step = 0; step < steps; step++) {
+        const angle = phase + (step * 2 * Math.PI) / steps
+        const candidate = boxAt(
+          Math.cos(angle) * radius * CLOUD_ASPECT,
+          Math.sin(angle) * radius
+        )
+
+        if (!this._collides(candidate, obstacles)) return candidate
+      }
+    }
+
+    return null
+  },
+
+  _collides(rect, obstacles) {
+    for (const other of obstacles) {
+      if (
+        rect.x < other.x + other.width + CLOUD_PADDING &&
+        rect.x + rect.width + CLOUD_PADDING > other.x &&
+        rect.y < other.y + other.height + CLOUD_PADDING &&
+        rect.y + rect.height + CLOUD_PADDING > other.y
+      ) {
+        return true
+      }
+    }
+
+    return false
+  },
+
+  // Fits the finished cloud to the container as one transform on the list.
+  //
+  // Words never move relative to each other once placed — that is the stability
+  // guarantee. What this does is zoom and centre the whole mass, which is
+  // animated over 700ms rather than snapped, so an arriving word settles the
+  // cloud instead of scattering it.
+  _fit({allowGrow}) {
+    if (!this._placed.size) return
+
+    const width = this.el.clientWidth
+    const height = this.el.clientHeight
+    if (!width || !height) return
+
+    let left = Infinity
+    let top = Infinity
+    let right = -Infinity
+    let bottom = -Infinity
+    for (const rect of this._placed.values()) {
+      left = Math.min(left, rect.x)
+      top = Math.min(top, rect.y)
+      right = Math.max(right, rect.x + rect.width)
+      bottom = Math.max(bottom, rect.y + rect.height)
+    }
+
+    const spanX = Math.max(right - left, 1)
+    const spanY = Math.max(bottom - top, 1)
+    const fit = Math.min(
+      (width * CLOUD_FIT_MARGIN) / spanX,
+      (height * CLOUD_FIT_MARGIN) / spanY,
+      CLOUD_MAX_SCALE
+    )
+
+    // An arriving word may shrink the cloud so it still fits; it may not zoom
+    // it back in, which would make the page pulse every time someone submits.
+    // A re-pack or a container resize starts the scale over.
+    const scale = allowGrow || this._scale === null ? fit : Math.min(this._scale, fit)
+
+    this._scale = scale
+    this._offset = {
+      x: width / 2 - scale * (left + spanX / 2),
+      y: height / 2 - scale * (top + spanY / 2)
+    }
+    this._render()
+  },
+
+  _render() {
+    if (!this._sheet) return
+
+    const selector = `#${CSS && CSS.escape ? CSS.escape(this.el.id) : this.el.id}`
+    // Measuring forced a style recalc with no transform on these elements, so
+    // the very first positions would otherwise animate in from the origin.
+    const settle = this._firstRender ? ";transition:none" : ""
+
+    const rules = [
+      `${selector}{transform:translate(${cloudRound(this._offset.x)}px,${cloudRound(this._offset.y)}px) ` +
+        `scale(${cloudRound(this._scale || 1, 4)})${settle}}`
+    ]
+
+    for (const rect of this._placed.values()) {
+      const spin = rect.rotated ? " rotate(-90deg)" : ""
+      rules.push(
+        `${selector} [data-word="${cloudEscape(rect.word)}"]` +
+          `{transform:translate(${cloudRound(rect.tx)}px,${cloudRound(rect.ty)}px)${spin};opacity:1}`
+      )
+    }
+
+    this._sheet.textContent = rules.join("\n")
+
+    if (this._firstRender) {
+      this._firstRender = false
+      requestAnimationFrame(() => this._render())
+    }
+  }
+}
+
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},

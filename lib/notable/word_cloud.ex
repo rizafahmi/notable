@@ -35,6 +35,7 @@ defmodule Notable.WordCloud do
   """
 
   alias Notable.WordCloud.Lexicon
+  alias Notable.WordCloud.Style
 
   @min_submissions 2
   @default_max_words 40
@@ -56,8 +57,10 @@ defmodule Notable.WordCloud do
   (**oldest-first**) order — that ordering is what makes the rendered layout
   stable. Entries may be `nil` or blank.
 
-  Returns a list of `%{word: String.t(), count: pos_integer, level: 1..5}` in
-  render order.
+  Returns a list of maps in render order, each carrying the word, its count,
+  its size `level` (1..5) and the appearance fields added by
+  `Notable.WordCloud.Style` — `:tone`, `:tone_class`, `:font_size` and
+  `:rotated`.
 
   ## Options
 
@@ -73,7 +76,7 @@ defmodule Notable.WordCloud do
     |> take_top(max_words)
     |> Enum.sort_by(fn {_word, {_count, pos}} -> pos end)
     |> Enum.map(fn {word, {count, _pos}} ->
-      %{word: word, count: count, level: level_for(count)}
+      Style.decorate(%{word: word, count: count, level: level_for(count)})
     end)
   end
 
