@@ -69,6 +69,38 @@ defmodule NotableWeb.DisplayFontTest do
       assert font.names["0"] =~ "Fraunces"
     end
 
+    test "carries a consistent internal identity, with no half-renamed leftovers",
+         %{font: font} do
+      # `fontTools.varLib.instancer` renames the font after its default
+      # instance, and that name lands in more records than the family pair:
+      # 3 unique ID, 4 full name, 6 PostScript name, 16/17 typographic
+      # family/subfamily and 25 the variations PostScript prefix. 16/17 take
+      # precedence over 1/2 where both exist, so renaming only 1/2 leaves the
+      # font still calling itself Fraunces Black where it counts.
+      for name_id <- ~w(1 4 16) do
+        assert font.names[name_id] == "Notable Display",
+               "name ID #{name_id} should be the display family"
+      end
+
+      for name_id <- ~w(2 17) do
+        assert font.names[name_id] == "Regular",
+               "name ID #{name_id} should be the subfamily"
+      end
+
+      assert font.names["6"] == "NotableDisplay-Regular"
+      assert font.names["3"] =~ "NotableDisplay-Regular"
+
+      # Provenance stays: the copyright and licence records still name Fraunces.
+      # What must not survive is the *instance* identity.
+      stale =
+        for {name_id, value} <- font.names,
+            name_id not in ~w(0 13 14),
+            value =~ ~r/Fraunces[ -]?(Black|Roman|9pt)/,
+            do: {name_id, value}
+
+      assert stale == [], "stale Fraunces instance identity left in the name table"
+    end
+
     test "carries the SIL Open Font License notice the OFL requires", %{font: font} do
       notice = Enum.join([font.names["0"] || "", font.names["13"] || ""], " ")
       assert notice =~ "Open Font License"

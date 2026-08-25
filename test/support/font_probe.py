@@ -5,9 +5,9 @@ Reads a single JSON argument and prints a JSON result on stdout:
 
   {"path": "priv/static/fonts/notable-display.woff2"}
 
-The result carries the family/subfamily names, the variation axes with their
-ranges and defaults, and the set of Unicode codepoints in the font's cmap.
-The suite uses that last part to prove the file contains glyphs for the text
+The result carries every name-table record keyed by name ID, the variation
+axes with their ranges and defaults, and the set of Unicode codepoints in the
+font's cmap. The suite uses that last part to prove the file contains glyphs for the text
 the site renders in the display face - a subset that omits `N` still loads
 without error, which is exactly how the Vietnamese-only subset went unnoticed.
 """
@@ -32,11 +32,13 @@ def main():
         for axis in (font["fvar"].axes if "fvar" in font else [])
     ]
 
+    # Every name record, keyed by name ID. The suite needs more than the family
+    # pair: instancing renames the font after its default instance and spreads
+    # that identity across IDs 1/2, 3, 4, 6, 16/17 and 25, so a half-finished
+    # rename is only visible when the whole table is reported.
     names = {}
     for record in font["name"].names:
-        # 1 = family, 2 = subfamily, 0 = copyright, 13 = licence, 14 = licence URL
-        if record.nameID in (0, 1, 2, 13, 14):
-            names.setdefault(str(record.nameID), record.toUnicode())
+        names.setdefault(str(record.nameID), record.toUnicode())
 
     print(
         json.dumps(

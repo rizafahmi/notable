@@ -28,7 +28,26 @@ not scraped from the Google CDN — a CDN URL pins a version that rotates, which
 is the mechanism that produced this bug. The script is the record of the
 instance choice; re-run it to rebuild.
 
+Upstream is pinned to commit `7ccdec3` (what `master` pointed at on 2026-08-25)
+and the downloaded variable font's sha256 is recorded in the script and checked
+after download, because a branch ref rotates more freely than the CDN URL the
+script exists to avoid, and nothing in the test suite can tell a drifted
+rebuild from an intended one — glyph coverage, the axis assertion and the OFL
+notice are all version-independent. Upgrading Fraunces means bumping
+`UPSTREAM_SHA` and `UPSTREAM_SHA256` together and re-running the tests. Both
+downloads use `curl --fail` and land in a temp dir; `priv/static/fonts/` is only
+overwritten once the build succeeds, so a failed run cannot leave the tracked
+OFL notice replaced by a `404: Not Found` body.
+
 Instance: **weight-only, `opsz=72`, `SOFT=0`, `WONK=1`, `wght` variable 200–900.**
+
+`fontTools.varLib.instancer` renames the font after its default instance, and
+that name lands in more records than the family pair — name IDs 3, 4, 6, 16/17
+and 25 as well as 1/2, with 16/17 taking precedence over 1/2 where both exist.
+The script rewrites all of them to the `Notable Display` identity while keeping
+the provenance records (0 copyright, 13 licence description, 14 licence URL)
+carried over from upstream. `display_font_test.exs` asserts that consistency, so
+a future rebuild cannot half-rename.
 
 Fraunces has four axes and the `@font-face` declares weight only, so the other
 three are pinned rather than left variable for the browser to default. Optical

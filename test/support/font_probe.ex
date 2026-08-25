@@ -38,10 +38,18 @@ defmodule Notable.FontProbe do
   @spec inspect_font(Path.t()) :: {:ok, report()} | {:error, term()}
   def inspect_font(path) do
     case System.cmd("python3", [@script, JSON.encode!(%{path: path})], stderr_to_stdout: true) do
-      {output, 0} ->
-        %{"codepoints" => codepoints, "axes" => axes, "names" => names, "glyph_count" => count} =
-          JSON.decode!(output)
+      {output, 0} -> parse(output)
+      {output, status} -> {:error, {:probe_failed, status, String.trim(output)}}
+    end
+  end
 
+  # `stderr_to_stdout: true` means fontTools' logging warnings land in the same
+  # buffer as the JSON while the process still exits 0, so decoding has to be
+  # tolerant - same shape as `Notable.QrDecode.parse/2`.
+  defp parse(output) do
+    case JSON.decode(String.trim(output)) do
+      {:ok,
+       %{"codepoints" => codepoints, "axes" => axes, "names" => names, "glyph_count" => count}} ->
         {:ok,
          %{
            codepoints: MapSet.new(codepoints),
@@ -50,8 +58,8 @@ defmodule Notable.FontProbe do
            glyph_count: count
          }}
 
-      {output, status} ->
-        {:error, "font_probe.py exited #{status}: #{output}"}
+      _ ->
+        {:error, {:unexpected_probe_output, output}}
     end
   end
 
