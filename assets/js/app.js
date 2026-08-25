@@ -699,12 +699,17 @@ Hooks.WordCloud = {
           pending.push(item)
           continue
         }
-        // The word's count crossed a size threshold, so the box it was placed
-        // in no longer describes it. Re-place that one word, not the cloud.
-        // Compared against the *measured* size, not the collision box: a
-        // rotated word's collision box has its dimensions swapped, so
-        // comparing that would re-place every vertical word on every update.
-        if (placed.measuredWidth !== item.width || placed.measuredHeight !== item.height) {
+        // The word's count crossed a size threshold, or its orientation
+        // changed, so the box it was placed in no longer describes it.
+        // Re-place that one word, not the cloud. Size is compared against the
+        // *measured* size, not the collision box: a rotated word's collision
+        // box has its dimensions swapped, so comparing that would re-place
+        // every vertical word on every update.
+        if (
+          placed.measuredWidth !== item.width ||
+          placed.measuredHeight !== item.height ||
+          placed.rotated !== item.rotated
+        ) {
           this._placed.delete(item.word)
           // Carry where it already sat, so a word that grows on its third
           // mention nudges within its neighbourhood instead of teleporting to
@@ -887,12 +892,21 @@ Hooks.WordCloud = {
         `scale(${cloudRound(this._scale || 1, 4)})${settle}}`
     ]
 
+    // Only a word with a position fades in. Keeping the animation here rather
+    // than in the static stylesheet means a word the packer could not place
+    // stays hidden instead of fading in at the container origin and vanishing.
+    const reveals = []
     for (const rect of this._placed.values()) {
       const spin = rect.rotated ? " rotate(-90deg)" : ""
+      const wordSelector = `${selector} [data-word="${cloudEscape(rect.word)}"]`
       rules.push(
-        `${selector} [data-word="${cloudEscape(rect.word)}"]` +
-          `{transform:translate(${cloudRound(rect.tx)}px,${cloudRound(rect.ty)}px)${spin};opacity:1}`
+        `${wordSelector}{transform:translate(${cloudRound(rect.tx)}px,${cloudRound(rect.ty)}px)${spin};opacity:1}`
       )
+      reveals.push(`${wordSelector}{animation:cloud-word-in 600ms ease-out}`)
+    }
+
+    if (reveals.length) {
+      rules.push(`@media (prefers-reduced-motion: no-preference){${reveals.join("")}}`)
     }
 
     this._sheet.textContent = rules.join("\n")

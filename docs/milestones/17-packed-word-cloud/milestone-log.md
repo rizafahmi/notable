@@ -126,7 +126,9 @@ prefix property (`decorate_all(prefix) == take(decorate_all(full), n)`).
 One edge remains: two submissions inserted in the **same second** are ordered by `id`
 on reload (`list_feedback_for_date` sorts `desc: inserted_at, desc: id`) but by arrival
 when live. A reconnect after that could swap two words' order, and with it their styles.
-The hook re-mounts and re-packs on reconnect anyway; it is noted, not fixed.
+LiveView's rejoin patches the list in place rather than re-mounting the hook, so the
+hook's incremental pass treats a changed `data-rotated` like a changed size and re-places
+that word near where it sat; the ordering itself is noted, not fixed.
 
 ### Tones as design tokens
 

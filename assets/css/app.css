@@ -531,6 +531,9 @@
   opacity: 0;
 }
 
+/* Applied by the hook's stylesheet, per word, alongside the position that
+   reveals it — never from a static rule, so a word without a position does not
+   fade in at the container origin and then vanish. */
 @keyframes cloud-word-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -545,10 +548,9 @@
     transition: transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  /* An animation, not a transition, because a word is inserted and positioned
-     inside one task — there is no two-value style change for a transition to
-     pick up, so a word arriving mid-talk would otherwise pop. */
-  .cloud-packed .cloud-word {
-    animation: cloud-word-in 600ms ease-out;
-  }
+  /* A word's fade-in (`cloud-word-in`) is an animation, not a transition,
+     because a word is inserted and positioned inside one task — there is no
+     two-value style change for a transition to pick up, so a word arriving
+     mid-talk would otherwise pop. The hook emits it under this same
+     reduced-motion guard, only for words it has placed. */
 }
